@@ -1,0 +1,6 @@
+domain: nephio.org
+layout:
+- go.kubebuilder.io/v3
+projectName: nf-injector-controller
+repo: github.com/henderiw-nephio/nf-injector-controller
+version: "3"
