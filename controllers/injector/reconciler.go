@@ -158,6 +158,9 @@ func (r *reconciler) injectNFInfo(ctx context.Context, namespacedName types.Name
 	r.l = log.FromContext(ctx)
 	r.l.Info("injector function", "name", namespacedName.String())
 
+	existingIPAllocations := map[string]int{}
+	existingUPFDeployments := map[string]int{}
+
 	origPr := &porchv1alpha1.PackageRevision{}
 	if err := r.porchClient.Get(ctx, namespacedName, origPr); err != nil {
 		return err
@@ -191,8 +194,14 @@ func (r *reconciler) injectNFInfo(ctx context.Context, namespacedName types.Name
 	dnn := ""
 	capacity := nfv1alpha1.UPFCapacity{}
 	region := ""
-	for _, rn := range pkgBuf.Nodes {
-		if rn.GetApiVersion() == "nf.nephio.org/v1alpha1" && rn.GetKind() == "UPF" {
+	for i, rn := range pkgBuf.Nodes {
+		if rn.GetApiVersion() == "ipam.nephio.org/v1alpha1" && rn.GetKind() == "IPAllocation" {
+			existingIPAllocations[rn.GetName()] = i
+		}
+		if rn.GetApiVersion() == "nf.nephio.org/v1alpha1" && rn.GetKind() == "UPFDeployment" {
+			existingUPFDeployments[rn.GetName()] = i
+		}
+		if rn.GetApiVersion() == "nf.nephio.org/v1alpha1" && rn.GetKind() == "FiveGCoreTopology" {
 			namespace = rn.GetNamespace()
 			if region, err = upf.GetRegion(rn); err != nil {
 				return err
@@ -222,8 +231,9 @@ func (r *reconciler) injectNFInfo(ctx context.Context, namespacedName types.Name
 	// create an IP Allocation per endpoint and per pool
 	for epName, ep := range endpoints {
 		if *ep.NetworkInstance != "" && *ep.NetworkName != "" {
+			ipAllocName := strings.Join([]string{"upf", region}, "-") // TODO need more discussion
 			ipAlloc, err := ipam.BuildIPAMAllocation(
-				strings.Join([]string{"upf", region}, "-"),
+				ipAllocName,
 				types.NamespacedName{
 					Name:      epName,
 					Namespace: namespace,
@@ -240,7 +250,13 @@ func (r *reconciler) injectNFInfo(ctx context.Context, namespacedName types.Name
 			if err != nil {
 				return errors.Wrap(err, "cannot get ipalloc rnode")
 			}
-			pkgBuf.Nodes = append(pkgBuf.Nodes, ipAlloc)
+			if i, ok := existingIPAllocations[strings.Join([]string{ipAllocName, epName}, "-")]; ok {
+				// exits -> replace
+				pkgBuf.Nodes[i] = ipAlloc
+			} else {
+				// add new entry
+				pkgBuf.Nodes = append(pkgBuf.Nodes, ipAlloc)
+			}
 		}
 	}
 
@@ -248,8 +264,9 @@ func (r *reconciler) injectNFInfo(ctx context.Context, namespacedName types.Name
 	if err != nil {
 		return err
 	}
+	ipPoolAllocName := strings.Join([]string{"upf", region}, "-")
 	ipAlloc, err := ipam.BuildIPAMAllocation(
-		strings.Join([]string{"upf", region}, "-"),
+		ipPoolAllocName,
 		types.NamespacedName{
 			Name:      "n6pool",
 			Namespace: namespace,
@@ -267,11 +284,18 @@ func (r *reconciler) injectNFInfo(ctx context.Context, namespacedName types.Name
 	if err != nil {
 		return errors.Wrap(err, "cannot get ipalloc rnode")
 	}
-	pkgBuf.Nodes = append(pkgBuf.Nodes, ipAlloc)
+	if i, ok := existingIPAllocations[strings.Join([]string{ipPoolAllocName, "n6pool"}, "-")]; ok {
+		// exits -> replace
+		pkgBuf.Nodes[i] = ipAlloc
+	} else {
+		// add new entry
+		pkgBuf.Nodes = append(pkgBuf.Nodes, ipAlloc)
+	}
 
-	updDeployment, err := upf.BuildUPFDeployment(
+	upfDeploymentName := strings.Join([]string{"upf", region}, "-")
+	upfDeployment, err := upf.BuildUPFDeployment(
 		types.NamespacedName{
-			Name:      strings.Join([]string{"upf", region}, "-"),
+			Name:      upfDeploymentName,
 			Namespace: namespace,
 		},
 		upf.BuildUPFDeploymentSpec(endpoints, dnn, capacity),
@@ -279,7 +303,14 @@ func (r *reconciler) injectNFInfo(ctx context.Context, namespacedName types.Name
 	if err != nil {
 		return errors.Wrap(err, "cannot build upfDeployment rnode")
 	}
-	pkgBuf.Nodes = append(pkgBuf.Nodes, updDeployment)
+	if i, ok := existingUPFDeployments[upfDeploymentName]; ok {
+		// exits -> replace
+		pkgBuf.Nodes[i] = upfDeployment
+	} else {
+		// add new entry
+		pkgBuf.Nodes = append(pkgBuf.Nodes, upfDeployment)
+	}
+	
 
 	newResources, err := porch.CreateUpdatedResources(prResources.Spec.Resources, pkgBuf)
 	if err != nil {
