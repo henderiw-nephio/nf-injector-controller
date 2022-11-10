@@ -13,42 +13,33 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 )
 
-func BuildIPAMAllocationFn(nsName types.NamespacedName, spec ipamv1alpha1.IPAllocationSpec) (*fn.KubeObject, error) {
-	ns := &ipamv1alpha1.IPAllocation{
+func getIPAllocation(nfName string, epName types.NamespacedName, spec ipamv1alpha1.IPAllocationSpec) string {
+	x :=  &ipamv1alpha1.IPAllocation{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       "IPAllocation",
-			APIVersion: "v1alpha1",
+			APIVersion: "ipam.nephio.org/v1alpha1",
 		},
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      nsName.Name,
-			Namespace: nsName.Namespace,
+			Name:      strings.Join([]string{nfName, epName.Name}, "-"),
+			Namespace: epName.Namespace,
+			Labels: map[string]string{
+				ipamv1alpha1.NephioInterfaceKey: epName.Name,
+			},
 		},
 		Spec: spec,
 	}
-
 	b := new(strings.Builder)
 	p := printers.YAMLPrinter{}
-	p.PrintObj(ns, b)
-
-	return fn.ParseKubeObject([]byte(b.String()))
+	p.PrintObj(x, b)
+	return b.String()
 }
 
-func BuildIPAMAllocation(nsName types.NamespacedName, spec ipamv1alpha1.IPAllocationSpec) (*kyaml.RNode, error) {
-	ns := &ipamv1alpha1.IPAllocation{
-		TypeMeta: metav1.TypeMeta{
-			Kind:       "IPAllocation",
-			APIVersion: "v1alpha1",
-		},
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      nsName.Name,
-			Namespace: nsName.Namespace,
-		},
-		Spec: spec,
-	}
+func BuildIPAMAllocationFn(nfName string, epName types.NamespacedName, spec ipamv1alpha1.IPAllocationSpec) (*fn.KubeObject, error) {
+	x := getIPAllocation(nfName, epName, spec)
+	return fn.ParseKubeObject([]byte(x))
+}
 
-	b := new(strings.Builder)
-	p := printers.YAMLPrinter{}
-	p.PrintObj(ns, b)
-
-	return kyaml.Parse(b.String())
+func BuildIPAMAllocation(nfName string, epName types.NamespacedName, spec ipamv1alpha1.IPAllocationSpec) (*kyaml.RNode, error) {
+	x := getIPAllocation(nfName, epName, spec)
+	return kyaml.Parse(x)
 }

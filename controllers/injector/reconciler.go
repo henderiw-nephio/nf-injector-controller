@@ -192,7 +192,7 @@ func (r *reconciler) injectNFInfo(ctx context.Context, namespacedName types.Name
 	capacity := nfv1alpha1.UPFCapacity{}
 	region := ""
 	for _, rn := range pkgBuf.Nodes {
-		if rn.GetApiVersion() == "infra.nephio.org/v1alpha1" && rn.GetKind() == "UPF" {
+		if rn.GetApiVersion() == "nf.nephio.org/v1alpha1" && rn.GetKind() == "UPF" {
 			namespace = rn.GetNamespace()
 			if region, err = upf.GetRegion(rn); err != nil {
 				return err
@@ -221,18 +221,21 @@ func (r *reconciler) injectNFInfo(ctx context.Context, namespacedName types.Name
 
 	// create an IP Allocation per endpoint and per pool
 	for epName, ep := range endpoints {
-		ipAlloc, err := ipam.BuildIPAMAllocation(types.NamespacedName{
-			Name:      epName,
-			Namespace: namespace,
-		}, ipamv1alpha1.IPAllocationSpec{
-			PrefixKind: string(ipamv1alpha1.PrefixKindNetwork),
-			Selector: &metav1.LabelSelector{
-				MatchLabels: map[string]string{
-					ipamv1alpha1.NephioNetworkInstanceKey: *ep.NetworkInstance,
-					ipamv1alpha1.NephioNetworkNameKey:     *ep.NetworkName,
-				},
+		ipAlloc, err := ipam.BuildIPAMAllocation(
+			strings.Join([]string{"upf", region}, "-"),
+			types.NamespacedName{
+				Name:      epName,
+				Namespace: namespace,
 			},
-		})
+			ipamv1alpha1.IPAllocationSpec{
+				PrefixKind: string(ipamv1alpha1.PrefixKindNetwork),
+				Selector: &metav1.LabelSelector{
+					MatchLabels: map[string]string{
+						ipamv1alpha1.NephioNetworkInstanceKey: *ep.NetworkInstance,
+						ipamv1alpha1.NephioNetworkNameKey:     *ep.NetworkName,
+					},
+				},
+			})
 		if err != nil {
 			return errors.Wrap(err, "cannot get ipalloc rnode")
 		}
@@ -244,10 +247,12 @@ func (r *reconciler) injectNFInfo(ctx context.Context, namespacedName types.Name
 		return err
 	}
 	ipAlloc, err := ipam.BuildIPAMAllocation(
+		strings.Join([]string{"upf", region}, "-"),
 		types.NamespacedName{
 			Name:      "n6pool",
 			Namespace: namespace,
-		}, ipamv1alpha1.IPAllocationSpec{
+		},
+		ipamv1alpha1.IPAllocationSpec{
 			PrefixKind:   string(ipamv1alpha1.PrefixKindPool),
 			PrefixLength: uint8(ps),
 			Selector: &metav1.LabelSelector{

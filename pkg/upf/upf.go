@@ -20,8 +20,8 @@ import (
 	"fmt"
 	"strings"
 
-	nfv1alpha1 "github.com/nephio-project/nephio-pocs/nephio-5gc-controller/apis/nf/v1alpha1"
 	"github.com/GoogleContainerTools/kpt-functions-sdk/go/fn"
+	nfv1alpha1 "github.com/nephio-project/nephio-pocs/nephio-5gc-controller/apis/nf/v1alpha1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -35,7 +35,7 @@ func MustGetValue(source *kyaml.RNode, fp string) string {
 	foundValue, lookupErr := source.Pipe(&kyaml.PathGetter{Path: fieldPath})
 	if lookupErr != nil {
 		return ""
-	} 
+	}
 	return strings.TrimSuffix(strings.ReplaceAll(foundValue.MustString(), `"`, ""), "\n")
 }
 
@@ -127,47 +127,6 @@ func GetRegion(source *kyaml.RNode) (string, error) {
 	return l["nephio.org/region"], nil
 }
 
-func BuildUPFDeployment(nsName types.NamespacedName, spec nfv1alpha1.UPFDeploymentSpec) (*kyaml.RNode, error) {
-	ns := &nfv1alpha1.UPFDeployment{
-		TypeMeta: metav1.TypeMeta{
-			Kind:       "UPFDeployment",
-			APIVersion: "v1alpha1",
-		},
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      nsName.Name,
-			Namespace: nsName.Namespace,
-		},
-		Spec: spec,
-	}
-
-	b := new(strings.Builder)
-	p := printers.YAMLPrinter{}
-	p.PrintObj(ns, b)
-
-	return kyaml.Parse(b.String())
-}
-
-func BuildUPFDeploymentSpec(endponts map[string]*nfv1alpha1.Endpoint, dnn string, capacity nfv1alpha1.UPFCapacity) nfv1alpha1.UPFDeploymentSpec {
-	spec := nfv1alpha1.UPFDeploymentSpec{
-		Capacity: capacity,
-	}
-	for epName, ep := range endponts {
-		if ep != nil {
-			switch epName {
-			case "n3":
-				spec.N3Interfaces = GetDummyInterfaces(epName)
-			case "n4":
-				spec.N4Interfaces = GetDummyInterfaces(epName)
-			case "n6":
-				spec.N6Interfaces = GetN6DummyInterfaces(epName, dnn)
-			case "n9":
-				spec.N9Interfaces = GetDummyInterfaces(epName)
-			}
-		}
-	}
-	return spec
-}
-
 func GetDummyInterface(n string) nfv1alpha1.InterfaceConfig {
 	return nfv1alpha1.InterfaceConfig{
 		Name:       n,
@@ -191,11 +150,32 @@ func GetN6DummyInterfaces(n, dnn string) []nfv1alpha1.N6InterfaceConfig {
 	}
 }
 
-func BuildUPFDeploymentFn(nsName types.NamespacedName, spec nfv1alpha1.UPFDeploymentSpec) (*fn.KubeObject, error) {
-	ns := &nfv1alpha1.UPFDeployment{
+func BuildUPFDeploymentSpec(endponts map[string]*nfv1alpha1.Endpoint, dnn string, capacity nfv1alpha1.UPFCapacity) nfv1alpha1.UPFDeploymentSpec {
+	spec := nfv1alpha1.UPFDeploymentSpec{
+		Capacity: capacity,
+	}
+	for epName, ep := range endponts {
+		if ep != nil {
+			switch epName {
+			case "n3":
+				spec.N3Interfaces = GetDummyInterfaces(epName)
+			case "n4":
+				spec.N4Interfaces = GetDummyInterfaces(epName)
+			case "n6":
+				spec.N6Interfaces = GetN6DummyInterfaces(epName, dnn)
+			case "n9":
+				spec.N9Interfaces = GetDummyInterfaces(epName)
+			}
+		}
+	}
+	return spec
+}
+
+func getUPFDeployment(nsName types.NamespacedName, spec nfv1alpha1.UPFDeploymentSpec) string {
+	x := &nfv1alpha1.UPFDeployment{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       "UPFDeployment",
-			APIVersion: "v1alpha1",
+			APIVersion: "nf.nephio.org/v1alpha1",
 		},
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      nsName.Name,
@@ -206,7 +186,16 @@ func BuildUPFDeploymentFn(nsName types.NamespacedName, spec nfv1alpha1.UPFDeploy
 
 	b := new(strings.Builder)
 	p := printers.YAMLPrinter{}
-	p.PrintObj(ns, b)
+	p.PrintObj(x, b)
+	return b.String()
+}
 
-	return fn.ParseKubeObject([]byte(b.String()))
+func BuildUPFDeploymentFn(nsName types.NamespacedName, spec nfv1alpha1.UPFDeploymentSpec) (*fn.KubeObject, error) {
+	x := getUPFDeployment(nsName, spec)
+	return fn.ParseKubeObject([]byte(x))
+}
+
+func BuildUPFDeployment(nsName types.NamespacedName, spec nfv1alpha1.UPFDeploymentSpec) (*kyaml.RNode, error) {
+	x := getUPFDeployment(nsName, spec)
+	return kyaml.Parse(x)
 }
