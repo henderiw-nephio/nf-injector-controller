@@ -1,9 +1,11 @@
 package ipam
 
 import (
+	"strconv"
 	"strings"
 
 	"k8s.io/cli-runtime/pkg/printers"
+	"sigs.k8s.io/kustomize/kyaml/utils"
 	kyaml "sigs.k8s.io/kustomize/kyaml/yaml"
 
 	//corev1 "k8s.io/api/core/v1"
@@ -14,7 +16,7 @@ import (
 )
 
 func getIPAllocation(nfName string, epName types.NamespacedName, spec ipamv1alpha1.IPAllocationSpec) string {
-	x :=  &ipamv1alpha1.IPAllocation{
+	x := &ipamv1alpha1.IPAllocation{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       "IPAllocation",
 			APIVersion: "ipam.nephio.org/v1alpha1",
@@ -42,4 +44,40 @@ func BuildIPAMAllocationFn(nfName string, epName types.NamespacedName, spec ipam
 func BuildIPAMAllocation(nfName string, epName types.NamespacedName, spec ipamv1alpha1.IPAllocationSpec) (*kyaml.RNode, error) {
 	x := getIPAllocation(nfName, epName, spec)
 	return kyaml.Parse(x)
+}
+
+func MustGetValue(source *kyaml.RNode, fp string) string {
+	fieldPath := utils.SmarterPathSplitter(fp, ".")
+	foundValue, lookupErr := source.Pipe(&kyaml.PathGetter{Path: fieldPath})
+	if lookupErr != nil {
+		return ""
+	}
+	return strings.TrimSuffix(strings.ReplaceAll(foundValue.MustString(), `"`, ""), "\n")
+}
+
+func GetValue(source *kyaml.RNode, fp string) (string, error) {
+	fieldPath := utils.SmarterPathSplitter(fp, ".")
+	foundValue, lookupErr := source.Pipe(&kyaml.PathGetter{Path: fieldPath})
+	if lookupErr != nil {
+		return "", lookupErr
+	}
+	return strings.TrimSuffix(strings.ReplaceAll(foundValue.MustString(), `"`, ""), "\n"), nil
+}
+
+func GetPrefixKind(source *kyaml.RNode) string {
+	return MustGetValue(source, "spec.kind")
+}
+
+func GetPrefixLength(source *kyaml.RNode) (int, error) {
+	pl := MustGetValue(source, "spec.prefixLength")
+	return strconv.Atoi(pl)
+}
+
+func GetIPAllocationSelectorMatchLabels(source *kyaml.RNode) (map[string]string, error) {
+	labels := MustGetValue(source, "spec.selector.matchLabels")
+	l := map[string]string{}
+	if err := kyaml.Unmarshal([]byte(labels), l); err != nil {
+		return nil, err
+	}
+	return l, nil
 }

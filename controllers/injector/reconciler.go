@@ -310,7 +310,6 @@ func (r *reconciler) injectNFInfo(ctx context.Context, namespacedName types.Name
 		// add new entry
 		pkgBuf.Nodes = append(pkgBuf.Nodes, upfDeployment)
 	}
-	
 
 	newResources, err := porch.CreateUpdatedResources(prResources.Spec.Resources, pkgBuf)
 	if err != nil {
