@@ -19,6 +19,7 @@ package injector
 import (
 	"context"
 	"strconv"
+	"strings"
 	"time"
 
 	porchv1alpha1 "github.com/GoogleContainerTools/kpt/porch/api/porch/v1alpha1"
@@ -183,27 +184,36 @@ func (r *reconciler) injectNFInfo(ctx context.Context, namespacedName types.Name
 	endpoints := map[string]*nfv1alpha1.Endpoint{
 		"n3": nil,
 		"n4": nil,
+		"n6": nil,
 		"n9": nil,
 	}
 	namespace := "default"
+	dnn := ""
+	capacity := nfv1alpha1.UPFCapacity{}
+	region := ""
 	for _, rn := range pkgBuf.Nodes {
 		if rn.GetApiVersion() == "infra.nephio.org/v1alpha1" && rn.GetKind() == "UPF" {
 			namespace = rn.GetNamespace()
+			if region, err = upf.GetRegion(rn); err != nil {
+				return err
+			}
+			dnn = upf.GetDnn(rn)
+			capacity = upf.GetCapacity(rn)
 			for epName := range endpoints {
-				if epName != "n6" {
-					ep, err := upf.GetEndpoint(epName, rn)
-					if err != nil {
-						return err
-					}
-					endpoints[epName] = ep
-				} else {
+				if epName == "n6" {
 					// it is assumed n6 is needed this i why an err is returned, when n6 is not found
-					n6ep, err := upf.GetN6Endpoint("n6", rn)
+					n6ep, err := upf.GetN6Endpoint(epName, rn)
 					if err != nil {
 						return err
 					}
 					endpoints[epName] = &n6ep.Endpoint
 					n6pool = n6ep.UEPool
+				} else {
+					ep, err := upf.GetEndpoint(epName, rn)
+					if err != nil {
+						return err
+					}
+					endpoints[epName] = ep
 				}
 			}
 		}
@@ -233,23 +243,36 @@ func (r *reconciler) injectNFInfo(ctx context.Context, namespacedName types.Name
 	if err != nil {
 		return err
 	}
-	ipAlloc, err := ipam.BuildIPAMAllocation(types.NamespacedName{
-		Name:      "n6pool",
-		Namespace: namespace,
-	}, ipamv1alpha1.IPAllocationSpec{
-		PrefixKind:   string(ipamv1alpha1.PrefixKindPool),
-		PrefixLength: uint8(ps),
-		Selector: &metav1.LabelSelector{
-			MatchLabels: map[string]string{
-				ipamv1alpha1.NephioNetworkInstanceKey: *n6pool.NetworkInstance,
-				ipamv1alpha1.NephioNetworkNameKey:     *n6pool.NetworkName,
+	ipAlloc, err := ipam.BuildIPAMAllocation(
+		types.NamespacedName{
+			Name:      "n6pool",
+			Namespace: namespace,
+		}, ipamv1alpha1.IPAllocationSpec{
+			PrefixKind:   string(ipamv1alpha1.PrefixKindPool),
+			PrefixLength: uint8(ps),
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{
+					ipamv1alpha1.NephioNetworkInstanceKey: *n6pool.NetworkInstance,
+					ipamv1alpha1.NephioNetworkNameKey:     *n6pool.NetworkName,
+				},
 			},
-		},
-	})
+		})
 	if err != nil {
 		return errors.Wrap(err, "cannot get ipalloc rnode")
 	}
 	pkgBuf.Nodes = append(pkgBuf.Nodes, ipAlloc)
+
+	updDeployment, err := upf.BuildUPFDeployment(
+		types.NamespacedName{
+			Name:      strings.Join([]string{"upf", region}, "-"),
+			Namespace: namespace,
+		},
+		upf.BuildUPFDeploymentSpec(endpoints, dnn, capacity),
+	)
+	if err != nil {
+		return errors.Wrap(err, "cannot build upfDeployment rnode")
+	}
+	pkgBuf.Nodes = append(pkgBuf.Nodes, updDeployment)
 
 	newResources, err := porch.CreateUpdatedResources(prResources.Spec.Resources, pkgBuf)
 	if err != nil {

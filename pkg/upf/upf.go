@@ -21,9 +21,22 @@ import (
 	"strings"
 
 	nfv1alpha1 "github.com/nephio-project/nephio-pocs/nephio-5gc-controller/apis/nf/v1alpha1"
+	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/cli-runtime/pkg/printers"
 	"sigs.k8s.io/kustomize/kyaml/utils"
 	kyaml "sigs.k8s.io/kustomize/kyaml/yaml"
 )
+
+func MustGetValue(source *kyaml.RNode, fp string) string {
+	fieldPath := utils.SmarterPathSplitter(fp, ".")
+	foundValue, lookupErr := source.Pipe(&kyaml.PathGetter{Path: fieldPath})
+	if lookupErr != nil {
+		return ""
+	}
+	return strings.TrimSuffix(foundValue.MustString(), "\n")
+}
 
 func GetValue(source *kyaml.RNode, fp string) (string, error) {
 	fieldPath := utils.SmarterPathSplitter(fp, ".")
@@ -35,11 +48,11 @@ func GetValue(source *kyaml.RNode, fp string) (string, error) {
 }
 
 func GetEndpoint(epName string, source *kyaml.RNode) (*nfv1alpha1.Endpoint, error) {
-	networkInstance, err := GetValue(source, fmt.Sprintf("spec.%s.0.networkInstance", epName))
+	networkInstance, err := GetValue(source, fmt.Sprintf("spec.upfs.0.upf.%s.0.networkInstance", epName))
 	if err != nil {
 		return nil, err
 	}
-	networkName, err := GetValue(source, fmt.Sprintf("spec.%s.0.networkName", epName))
+	networkName, err := GetValue(source, fmt.Sprintf("spec.upfs.0.upf..%s.0.networkName", epName))
 	if err != nil {
 		return nil, err
 	}
@@ -51,24 +64,25 @@ func GetEndpoint(epName string, source *kyaml.RNode) (*nfv1alpha1.Endpoint, erro
 }
 
 func GetN6Endpoint(epName string, source *kyaml.RNode) (*nfv1alpha1.N6Endpoint, error) {
-	networkInstance, err := GetValue(source, fmt.Sprintf("spec.%s.endpoint.networkInstance", epName))
+	networkInstance, err := GetValue(source, fmt.Sprintf("spec.upfs.0.upf.%s.0.endpoint.networkInstance", epName))
 	if err != nil {
 		return nil, err
 	}
-	networkName, err := GetValue(source, fmt.Sprintf("spec.%s.endpoint.networkName", epName))
+	networkName, err := GetValue(source, fmt.Sprintf("spec.upfs.0.upf.%s.0.endpoint.networkName", epName))
 	if err != nil {
 		return nil, err
 	}
 
-	poolNetworkInstance, err := GetValue(source, fmt.Sprintf("spec.%s.pool.0.networkInstance", epName))
+	poolNetworkInstance, err := GetValue(source, fmt.Sprintf("spec.upfs.0.upf.%s.0.uePool.networkInstance", epName))
 	if err != nil {
 		return nil, err
 	}
-	poolNetworkName, err := GetValue(source, fmt.Sprintf("spec.%s.pool.0.networkName", epName))
+
+	poolNetworkName, err := GetValue(source, fmt.Sprintf("spec.upfs.0.upf.%s.0.uePool.networkName", epName))
 	if err != nil {
 		return nil, err
 	}
-	poolPrefixSize, err := GetValue(source, fmt.Sprintf("spec.%s.pool.0.prefixSize", epName))
+	poolPrefixSize, err := GetValue(source, fmt.Sprintf("spec.upfs.0.upf.%s.0.uePool.prefixSize", epName))
 	if err != nil {
 		return nil, err
 	}
@@ -84,5 +98,93 @@ func GetN6Endpoint(epName string, source *kyaml.RNode) (*nfv1alpha1.N6Endpoint, 
 			PrefixSize:      &poolPrefixSize,
 		},
 	}, nil
+}
 
+func GetDnn(source *kyaml.RNode) string {
+	return MustGetValue(source, "spec.upfs.0.upf.n6.0.dnn")
+}
+
+func GetCapacity(source *kyaml.RNode) nfv1alpha1.UPFCapacity {
+	uplinkThroughput := MustGetValue(source, "spec.upfs.0.upf.capacity.uplinkThroughput")
+	downlinkThroughput := MustGetValue(source, "spec.upfs.0.upf.capacity.downlinkThroughput")
+
+	uplinkThroughput = strings.ReplaceAll(uplinkThroughput, `"`, "")
+	downlinkThroughput = strings.ReplaceAll(downlinkThroughput, `"`, "")
+	return nfv1alpha1.UPFCapacity{
+		UplinkThroughput:   resource.MustParse(uplinkThroughput),
+		DownlinkThroughput: resource.MustParse(downlinkThroughput),
+	}
+}
+
+func GetRegion(source *kyaml.RNode) (string, error) {
+	labels := MustGetValue(source, "spec.upfs.0.selector.matchLabels")
+	l := map[string]string{}
+	if err := kyaml.Unmarshal([]byte(labels), l); err != nil {
+		return "", err
+	}
+	return l["nephio.org/region"], nil
+}
+
+func BuildUPFDeployment(nsName types.NamespacedName, spec nfv1alpha1.UPFDeploymentSpec) (*kyaml.RNode, error) {
+	ns := &nfv1alpha1.UPFDeployment{
+		TypeMeta: metav1.TypeMeta{
+			Kind:       "UPFDeployment",
+			APIVersion: "v1alpha1",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      nsName.Name,
+			Namespace: nsName.Namespace,
+		},
+		Spec: spec,
+	}
+
+	b := new(strings.Builder)
+	p := printers.YAMLPrinter{}
+	p.PrintObj(ns, b)
+
+	return kyaml.Parse(b.String())
+}
+
+func BuildUPFDeploymentSpec(endponts map[string]*nfv1alpha1.Endpoint, dnn string, capacity nfv1alpha1.UPFCapacity) nfv1alpha1.UPFDeploymentSpec {
+	spec := nfv1alpha1.UPFDeploymentSpec{
+		Capacity: capacity,
+	}
+	for epName, ep := range endponts {
+		if ep != nil {
+			switch epName {
+			case "n3":
+				spec.N3Interfaces = GetDummyInterfaces(epName)
+			case "n4":
+				spec.N4Interfaces = GetDummyInterfaces(epName)
+			case "n6":
+				spec.N6Interfaces = GetN6DummyInterfaces(epName, dnn)
+			case "n9":
+				spec.N9Interfaces = GetDummyInterfaces(epName)
+			}
+		}
+	}
+	return spec
+}
+
+func GetDummyInterface(n string) nfv1alpha1.InterfaceConfig {
+	return nfv1alpha1.InterfaceConfig{
+		Name:       n,
+		IPs:        []string{""},
+		GatewayIPs: []string{""},
+	}
+}
+
+func GetDummyInterfaces(n string) []nfv1alpha1.InterfaceConfig {
+	i := make([]nfv1alpha1.InterfaceConfig, 0)
+	return append(i, GetDummyInterface(n))
+}
+
+func GetN6DummyInterfaces(n, dnn string) []nfv1alpha1.N6InterfaceConfig {
+	return []nfv1alpha1.N6InterfaceConfig{
+		{
+			Interface: GetDummyInterface(n),
+			DNN:       "",
+			UEIPPool:  "",
+		},
+	}
 }
