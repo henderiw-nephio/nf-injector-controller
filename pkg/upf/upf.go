@@ -87,6 +87,7 @@ func GetN6Endpoint(epName string, source *kyaml.RNode) (*nfv1alpha1.N6Endpoint, 
 	if err != nil {
 		return nil, err
 	}
+	poolPrefixSize = strings.ReplaceAll(poolPrefixSize, "/", "")
 
 	return &nfv1alpha1.N6Endpoint{
 		Endpoint: nfv1alpha1.Endpoint{
