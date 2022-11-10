@@ -35,8 +35,8 @@ func MustGetValue(source *kyaml.RNode, fp string) string {
 	foundValue, lookupErr := source.Pipe(&kyaml.PathGetter{Path: fieldPath})
 	if lookupErr != nil {
 		return ""
-	}
-	return strings.TrimSuffix(foundValue.MustString(), "\n")
+	} 
+	return strings.TrimSuffix(strings.ReplaceAll(foundValue.MustString(), `"`, ""), "\n")
 }
 
 func GetValue(source *kyaml.RNode, fp string) (string, error) {
@@ -45,7 +45,7 @@ func GetValue(source *kyaml.RNode, fp string) (string, error) {
 	if lookupErr != nil {
 		return "", lookupErr
 	}
-	return strings.TrimSuffix(foundValue.MustString(), "\n"), nil
+	return strings.TrimSuffix(strings.ReplaceAll(foundValue.MustString(), `"`, ""), "\n"), nil
 }
 
 func GetEndpoint(epName string, source *kyaml.RNode) (*nfv1alpha1.Endpoint, error) {
