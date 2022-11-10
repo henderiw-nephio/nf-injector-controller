@@ -221,25 +221,27 @@ func (r *reconciler) injectNFInfo(ctx context.Context, namespacedName types.Name
 
 	// create an IP Allocation per endpoint and per pool
 	for epName, ep := range endpoints {
-		ipAlloc, err := ipam.BuildIPAMAllocation(
-			strings.Join([]string{"upf", region}, "-"),
-			types.NamespacedName{
-				Name:      epName,
-				Namespace: namespace,
-			},
-			ipamv1alpha1.IPAllocationSpec{
-				PrefixKind: string(ipamv1alpha1.PrefixKindNetwork),
-				Selector: &metav1.LabelSelector{
-					MatchLabels: map[string]string{
-						ipamv1alpha1.NephioNetworkInstanceKey: *ep.NetworkInstance,
-						ipamv1alpha1.NephioNetworkNameKey:     *ep.NetworkName,
-					},
+		if *ep.NetworkInstance != "" && *ep.NetworkName != "" {
+			ipAlloc, err := ipam.BuildIPAMAllocation(
+				strings.Join([]string{"upf", region}, "-"),
+				types.NamespacedName{
+					Name:      epName,
+					Namespace: namespace,
 				},
-			})
-		if err != nil {
-			return errors.Wrap(err, "cannot get ipalloc rnode")
+				ipamv1alpha1.IPAllocationSpec{
+					PrefixKind: string(ipamv1alpha1.PrefixKindNetwork),
+					Selector: &metav1.LabelSelector{
+						MatchLabels: map[string]string{
+							ipamv1alpha1.NephioNetworkInstanceKey: *ep.NetworkInstance,
+							ipamv1alpha1.NephioNetworkNameKey:     *ep.NetworkName,
+						},
+					},
+				})
+			if err != nil {
+				return errors.Wrap(err, "cannot get ipalloc rnode")
+			}
+			pkgBuf.Nodes = append(pkgBuf.Nodes, ipAlloc)
 		}
-		pkgBuf.Nodes = append(pkgBuf.Nodes, ipAlloc)
 	}
 
 	ps, err := strconv.Atoi(*n6pool.PrefixSize)
