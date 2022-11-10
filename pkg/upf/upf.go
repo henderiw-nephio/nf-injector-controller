@@ -21,6 +21,7 @@ import (
 	"strings"
 
 	nfv1alpha1 "github.com/nephio-project/nephio-pocs/nephio-5gc-controller/apis/nf/v1alpha1"
+	"github.com/GoogleContainerTools/kpt-functions-sdk/go/fn"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -187,4 +188,24 @@ func GetN6DummyInterfaces(n, dnn string) []nfv1alpha1.N6InterfaceConfig {
 			UEIPPool:  "",
 		},
 	}
+}
+
+func BuildUPFDeploymentFn(nsName types.NamespacedName, spec nfv1alpha1.UPFDeploymentSpec) (*fn.KubeObject, error) {
+	ns := &nfv1alpha1.UPFDeployment{
+		TypeMeta: metav1.TypeMeta{
+			Kind:       "UPFDeployment",
+			APIVersion: "v1alpha1",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      nsName.Name,
+			Namespace: nsName.Namespace,
+		},
+		Spec: spec,
+	}
+
+	b := new(strings.Builder)
+	p := printers.YAMLPrinter{}
+	p.PrintObj(ns, b)
+
+	return fn.ParseKubeObject([]byte(b.String()))
 }
