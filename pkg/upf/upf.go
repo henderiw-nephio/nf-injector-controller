@@ -144,7 +144,7 @@ func GetN6DummyInterfaces(n, dnn string) []nfv1alpha1.N6InterfaceConfig {
 	return []nfv1alpha1.N6InterfaceConfig{
 		{
 			Interface: GetDummyInterface(n),
-			DNN:       "",
+			DNN:       dnn,
 			UEIPPool:  "",
 		},
 	}
@@ -155,7 +155,7 @@ func BuildUPFDeploymentSpec(endponts map[string]*nfv1alpha1.Endpoint, dnn string
 		Capacity: capacity,
 	}
 	for epName, ep := range endponts {
-		if ep != nil {
+		if ep != nil && *ep.NetworkInstance != "" && *ep.NetworkName != "" {
 			switch epName {
 			case "n3":
 				spec.N3Interfaces = GetDummyInterfaces(epName)
