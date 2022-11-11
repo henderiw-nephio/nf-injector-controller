@@ -184,6 +184,42 @@ func (r *reconciler) injectNFInfo(ctx context.Context, namespacedName types.Name
 
 	prConditions := convertConditions(pr.Status.Conditions)
 
+	if err := r.injectNFResources(ctx, namespacedName, prConditions, pr); err != nil {
+		// for now just assume the error applies to all UPFDeployments
+		// we should only have one for the proof-of-concept
+		for _, c := range *prConditions {
+			if !strings.HasPrefix(c.Type, upfConditionType) {
+				continue
+			}
+			if meta.IsStatusConditionTrue(*prConditions, c.Type) {
+				continue
+			}
+			meta.SetStatusCondition(prConditions, metav1.Condition{Type: c.Type, Status: metav1.ConditionFalse,
+				Reason: "ErrorDuringInjection", Message: fmt.Sprintf(err.Error())})
+
+		}
+	}
+
+	pr.Status.Conditions = unconvertConditions(prConditions)
+
+	// If nothing changed, then no need to update.
+	// TODO: For some reason using equality.Semantic.DeepEqual and the full PackageRevision always reports a diff.
+	// We should find out why.
+	if equality.Semantic.DeepEqual(origPr.Status, pr.Status) {
+		return nil
+	}
+
+	if err := r.Update(ctx, pr); err != nil {
+		return errors.Wrap(err, "cannot update packagerevision")
+	}
+
+	return nil
+}
+
+func (r *reconciler) injectNFResources(ctx context.Context, namespacedName types.NamespacedName,
+	prConditions *[]metav1.Condition,
+	pr *porchv1alpha1.PackageRevision) error {
+
 	prResources := &porchv1alpha1.PackageRevisionResources{}
 	if err := r.porchClient.Get(ctx, namespacedName, prResources); err != nil {
 		return err
@@ -421,40 +457,6 @@ func (r *reconciler) injectNFInfo(ctx context.Context, namespacedName types.Name
 	prResources.Spec.Resources = newResources
 	if err = r.porchClient.Update(ctx, prResources); err != nil {
 		return err
-	}
-
-	pr.Status.Conditions = unconvertConditions(prConditions)
-	/* holding off on readiness gates right now
-	hasReadinessGateForKind := hasReadinessGate(pr.Spec.ReadinessGates, r.kind)
-	kindCondition, found := hasCondition(pr.Status.Conditions, r.kind)
-	if !hasReadinessGateForKind {
-		pr.Spec.ReadinessGates = append(pr.Spec.ReadinessGates, porchv1alpha1.ReadinessGate{
-			ConditionType: "bar",
-		})
-	}
-
-	// If the condition is not already set on the PackageRevision, set it. Otherwise just
-	// make sure that the status is "True".
-	if !found {
-		pr.Status.Conditions = append(pr.Status.Conditions, porchv1alpha1.Condition{
-			Type:   "foo",
-			Status: porchv1alpha1.ConditionTrue,
-		})
-	} else {
-		kindCondition.Status = porchv1alpha1.ConditionTrue
-	}
-	*/
-
-	// If nothing changed, then no need to update.
-	// TODO: For some reason using equality.Semantic.DeepEqual and the full PackageRevision always reports a diff.
-	// We should find out why.
-	if equality.Semantic.DeepEqual(origPr.Spec.ReadinessGates, pr.Spec.ReadinessGates) &&
-		equality.Semantic.DeepEqual(origPr.Status, pr.Status) {
-		return nil
-	}
-
-	if err := r.Update(ctx, pr); err != nil {
-		return errors.Wrap(err, "cannot update packagerevision")
 	}
 
 	return nil
