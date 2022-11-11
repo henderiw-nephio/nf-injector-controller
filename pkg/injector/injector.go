@@ -110,6 +110,7 @@ func (r *injector) injector(ctx context.Context) {
 		r.retryAttempts++
 		r.l.Info("inject", "name", r.GetName(), "attempt", r.retryAttempts)
 		if err := r.injectorFn(ctx, r.namespacedName); err != nil {
+			r.l.Error(err, "injection failed")
 			continue
 		}
 		return
