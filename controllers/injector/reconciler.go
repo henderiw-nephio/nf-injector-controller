@@ -25,6 +25,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/meta"
 
+	kptfile "github.com/GoogleContainerTools/kpt/pkg/api/kptfile/v1"
 	porchv1alpha1 "github.com/GoogleContainerTools/kpt/porch/api/porch/v1alpha1"
 	"github.com/go-logr/logr"
 	"github.com/henderiw-nephio/nf-injector-controller/pkg/injectors"
@@ -38,13 +39,13 @@ import (
 	ipamv1alpha1 "github.com/nokia/k8s-ipam/apis/ipam/v1alpha1"
 	"github.com/nokia/k8s-ipam/pkg/alloc/allocpb"
 	"github.com/pkg/errors"
-	"k8s.io/apimachinery/pkg/api/equality"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/kustomize/kyaml/kio"
 	kyaml "sigs.k8s.io/kustomize/kyaml/yaml"
 )
 
@@ -123,9 +124,11 @@ func (r *reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 			Name:      cr.Name,
 		}
 
-		r.injectNFInfo(ctx, crName)
-		// run the injector when the ipam readiness gate is set
 		r.l.Info("injector running", "pr", cr.GetName())
+		if err := r.injectNFInfo(ctx, crName); err != nil {
+			r.l.Error(err, "injection error")
+			return ctrl.Result{}, err
+		}
 	}
 
 	return ctrl.Result{}, nil
@@ -178,7 +181,11 @@ func (r *reconciler) injectNFInfo(ctx context.Context, namespacedName types.Name
 
 	prConditions := convertConditions(pr.Status.Conditions)
 
-	if err := r.injectNFResources(ctx, namespacedName, prConditions, pr); err != nil {
+	prResources, pkgBuf, err := r.injectNFResources(ctx, namespacedName, prConditions, pr)
+	if err != nil {
+		if pkgBuf == nil {
+			return err
+		}
 		// for now just assume the error applies to all UPFDeployments
 		// we should only have one for the proof-of-concept
 		for _, c := range *prConditions {
@@ -196,15 +203,33 @@ func (r *reconciler) injectNFInfo(ctx context.Context, namespacedName types.Name
 
 	pr.Status.Conditions = unconvertConditions(prConditions)
 
-	// If nothing changed, then no need to update.
-	// TODO: For some reason using equality.Semantic.DeepEqual and the full PackageRevision always reports a diff.
-	// We should find out why.
-	if equality.Semantic.DeepEqual(origPr.Status, pr.Status) {
-		return nil
+	// conditions are stored in the Kptfile right now
+	for i, n := range pkgBuf.Nodes {
+		if n.GetKind() == "Kptfile" {
+			// we need to update the status
+			nStr := n.MustString()
+			var kf kptfile.KptFile
+			if err := kyaml.Unmarshal([]byte(nStr), &kf); err != nil {
+				return err
+			}
+			if kf.Status == nil {
+				kf.Status = &kptfile.Status{}
+			}
+			kf.Status.Conditions = conditionsToKptfile(prConditions)
+
+			kfBytes, _ := kyaml.Marshal(kf)
+			node := kyaml.MustParse(string(kfBytes))
+			pkgBuf.Nodes[i] = node
+		}
 	}
 
-	if err := r.Update(ctx, pr); err != nil {
-		return errors.Wrap(err, "cannot update packagerevision")
+	newResources, err := porch.CreateUpdatedResources(prResources.Spec.Resources, pkgBuf)
+	if err != nil {
+		return errors.Wrap(err, "cannot update package revision resources")
+	}
+	prResources.Spec.Resources = newResources
+	if err = r.porchClient.Update(ctx, prResources); err != nil {
+		return err
 	}
 
 	return nil
@@ -212,16 +237,16 @@ func (r *reconciler) injectNFInfo(ctx context.Context, namespacedName types.Name
 
 func (r *reconciler) injectNFResources(ctx context.Context, namespacedName types.NamespacedName,
 	prConditions *[]metav1.Condition,
-	pr *porchv1alpha1.PackageRevision) error {
+	pr *porchv1alpha1.PackageRevision) (*porchv1alpha1.PackageRevisionResources, *kio.PackageBuffer, error) {
 
 	prResources := &porchv1alpha1.PackageRevisionResources{}
 	if err := r.porchClient.Get(ctx, namespacedName, prResources); err != nil {
-		return err
+		return nil, nil, err
 	}
 
 	pkgBuf, err := porch.ResourcesToPackageBuffer(prResources.Spec.Resources)
 	if err != nil {
-		return err
+		return prResources, nil, err
 	}
 
 	// retrieve the corresponding FiveGCoreTopology resource
@@ -229,18 +254,18 @@ func (r *reconciler) injectNFResources(ctx context.Context, namespacedName types
 	if n, ok := pr.Annotations["nf.nephio.org/topology"]; ok {
 		fiveGCoreId.Name = n
 	} else {
-		return fmt.Errorf("missing %q annotation", "nf.nephio.org/topology")
+		return prResources, pkgBuf, fmt.Errorf("missing %q annotation", "nf.nephio.org/topology")
 	}
 
 	var fiveGCore nfv1alpha1.FiveGCoreTopology
 	if err := r.Get(ctx, fiveGCoreId, &fiveGCore); err != nil {
-		return err
+		return prResources, pkgBuf, err
 	}
 
 	// find the corresponding UPFSpec in the FiveGCoreTopology resource
 	clusterSetName, ok := pr.Annotations["nf.nephio.org/cluster-set"]
 	if !ok {
-		return fmt.Errorf("missing %q annotation", "nf.nephio.org/cluster-set")
+		return prResources, pkgBuf, fmt.Errorf("missing %q annotation", "nf.nephio.org/cluster-set")
 	}
 
 	var upfSpec *nfv1alpha1.UPFSpec
@@ -252,13 +277,13 @@ func (r *reconciler) injectNFResources(ctx context.Context, namespacedName types
 	}
 
 	if upfSpec == nil {
-		return fmt.Errorf("did not find UPF %q in FiveGCoreTopology", clusterSetName)
+		return prResources, pkgBuf, fmt.Errorf("did not find UPF %q in FiveGCoreTopology", clusterSetName)
 	}
 
 	// retrieve the corresponding UPFClass resource
 	var upfClass nfv1alpha1.UPFClass
 	if err := r.Get(ctx, client.ObjectKey{Name: upfSpec.UPFClassName}, &upfClass); err != nil {
-		return err
+		return prResources, pkgBuf, err
 	}
 
 	// Option 1
@@ -271,29 +296,29 @@ func (r *reconciler) injectNFResources(ctx context.Context, namespacedName types
 
 	// for now we only support exactly one N3, N4, N6, and zero or one N9
 	if len(upfSpec.N3) != 1 {
-		return fmt.Errorf("exactly one N3 endpoint should be defined")
+		return prResources, pkgBuf, fmt.Errorf("exactly one N3 endpoint should be defined")
 	}
 
 	if len(upfSpec.N4) != 1 {
-		return fmt.Errorf("exactly one N4 endpoint should be defined")
+		return prResources, pkgBuf, fmt.Errorf("exactly one N4 endpoint should be defined")
 	}
 
 	if len(upfSpec.N6) != 1 {
-		return fmt.Errorf("exactly one N6 endpoint should be defined")
+		return prResources, pkgBuf, fmt.Errorf("exactly one N6 endpoint should be defined")
 	}
 
 	if len(upfSpec.N9) > 1 {
-		return fmt.Errorf("at most one N9 endpoint should be defined")
+		return prResources, pkgBuf, fmt.Errorf("at most one N9 endpoint should be defined")
 	}
 
 	n6pool := upfSpec.N6[0].UEPool
 
 	if n6pool.NetworkInstance == nil || *n6pool.NetworkInstance == "" {
-		return fmt.Errorf("N6.NetworkInstance is required")
+		return prResources, pkgBuf, fmt.Errorf("N6.NetworkInstance is required")
 	}
 
 	if n6pool.NetworkName == nil || *n6pool.NetworkName == "" {
-		return fmt.Errorf("N6.NetworkName is required")
+		return prResources, pkgBuf, fmt.Errorf("N6.NetworkName is required")
 	}
 
 	endpoints := map[string]*nfv1alpha1.Endpoint{
@@ -323,19 +348,19 @@ func (r *reconciler) injectNFResources(ctx context.Context, namespacedName types
 	}
 
 	if clusterContext == nil {
-		return fmt.Errorf("ClusterContext is required")
+		return prResources, pkgBuf, fmt.Errorf("ClusterContext is required")
 	}
 
 	if clusterContext.Spec.SiteCode == nil || *clusterContext.Spec.SiteCode == "" {
-		return fmt.Errorf("CluterContext.Spec.SiteCode is required")
+		return prResources, pkgBuf, fmt.Errorf("CluterContext.Spec.SiteCode is required")
 	}
 
 	if len(existingUPFDeployments) == 0 {
-		return fmt.Errorf("no existing UPFDeployment found in the package")
+		return prResources, pkgBuf, fmt.Errorf("no existing UPFDeployment found in the package")
 	}
 
 	if len(existingUPFDeployments) > 1 {
-		return fmt.Errorf("only a single UPFDeployment should be in the package")
+		return prResources, pkgBuf, fmt.Errorf("only a single UPFDeployment should be in the package")
 	}
 
 	// create an IP Allocation per endpoint and per pool
@@ -363,7 +388,7 @@ func (r *reconciler) injectNFResources(ctx context.Context, namespacedName types
 				},
 			})
 		if err != nil {
-			return errors.Wrap(err, "cannot get ipalloc rnode")
+			return prResources, pkgBuf, errors.Wrap(err, "cannot get ipalloc rnode")
 		}
 		if i, ok := existingIPAllocations[ipamResourceName]; ok {
 			r.l.Info("replacing existing IPAllocation", "ipamResourceName", ipamResourceName, "ipAlloc", ipAlloc)
@@ -383,7 +408,7 @@ func (r *reconciler) injectNFResources(ctx context.Context, namespacedName types
 
 	ps, err := strconv.Atoi(*n6pool.PrefixSize)
 	if err != nil {
-		return err
+		return prResources, pkgBuf, err
 	}
 	ipPoolAllocName := strings.Join([]string{"upf", *clusterContext.Spec.SiteCode}, "-")
 	ipAlloc, err := ipam.BuildIPAMAllocation(
@@ -403,7 +428,7 @@ func (r *reconciler) injectNFResources(ctx context.Context, namespacedName types
 			},
 		})
 	if err != nil {
-		return errors.Wrap(err, "cannot get ipalloc rnode")
+		return prResources, pkgBuf, errors.Wrap(err, "cannot get ipalloc rnode")
 	}
 	if i, ok := existingIPAllocations[strings.Join([]string{ipPoolAllocName, "n6pool"}, "-")]; ok {
 		// exits -> replace
@@ -422,7 +447,7 @@ func (r *reconciler) injectNFResources(ctx context.Context, namespacedName types
 		upf.BuildUPFDeploymentSpec(endpoints, upfSpec.N6[0].DNN, upfSpec.Capacity),
 	)
 	if err != nil {
-		return errors.Wrap(err, "cannot build upfDeployment rnode")
+		return prResources, pkgBuf, errors.Wrap(err, "cannot build upfDeployment rnode")
 	}
 	conditionType := fmt.Sprintf("%s.%s.%s.Injected", upfConditionType, upfDeploymentName, namespace)
 	if i, ok := existingUPFDeployments[upfDeploymentName]; ok {
@@ -433,25 +458,17 @@ func (r *reconciler) injectNFResources(ctx context.Context, namespacedName types
 			r.l.Error(err, "could not set UPFDeployment.Spec")
 			meta.SetStatusCondition(prConditions, metav1.Condition{Type: conditionType, Status: metav1.ConditionFalse,
 				Reason: "ResourceSpecErr", Message: err.Error()})
-			return err
+			return prResources, pkgBuf, err
 		}
 
+		r.l.Info("setting ipam condition", "conditionType", conditionType)
 		meta.SetStatusCondition(prConditions, metav1.Condition{Type: conditionType, Status: metav1.ConditionTrue,
 			Reason: "ResourceInjected", Message: fmt.Sprintf("injected from FiveGCoreTopology %q UPF name %q",
 				fiveGCore.Name, clusterSetName)})
 
 	}
 
-	newResources, err := porch.CreateUpdatedResources(prResources.Spec.Resources, pkgBuf)
-	if err != nil {
-		return errors.Wrap(err, "cannot update package revision resources")
-	}
-	prResources.Spec.Resources = newResources
-	if err = r.porchClient.Update(ctx, prResources); err != nil {
-		return err
-	}
-
-	return nil
+	return prResources, pkgBuf, nil
 }
 
 // copied from package deployment controller - clearly we need some libraries or
@@ -467,6 +484,19 @@ func convertConditions(conditions []porchv1alpha1.Condition) *[]metav1.Condition
 		})
 	}
 	return &result
+}
+
+func conditionsToKptfile(conditions *[]metav1.Condition) []kptfile.Condition {
+	var prConditions []kptfile.Condition
+	for _, c := range *conditions {
+		prConditions = append(prConditions, kptfile.Condition{
+			Type:    c.Type,
+			Reason:  c.Reason,
+			Status:  kptfile.ConditionStatus(c.Status),
+			Message: c.Message,
+		})
+	}
+	return prConditions
 }
 
 func unconvertConditions(conditions *[]metav1.Condition) []porchv1alpha1.Condition {
