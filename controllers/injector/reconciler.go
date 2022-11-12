@@ -37,7 +37,6 @@ import (
 	"github.com/nephio-project/nephio-controller-poc/pkg/porch"
 	nfv1alpha1 "github.com/nephio-project/nephio-pocs/nephio-5gc-controller/apis/nf/v1alpha1"
 	ipamv1alpha1 "github.com/nokia/k8s-ipam/apis/ipam/v1alpha1"
-	"github.com/nokia/k8s-ipam/pkg/alloc/allocpb"
 	"github.com/pkg/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -53,11 +52,11 @@ const (
 	finalizer         = "injector.nephio.org/finalizer"
 	upfConditionType  = "nf.nephio.org.UPFDeployment"
 	ipamConditionType = "ipam.nephio.org.IPAMAllocation"
-	readinessGateKind = "nf"
+	//readinessGateKind = "nf"
 
-	defaultNetworkInstance = "vpc-1"
-	defaultKind            = "nad"
-	defaultCniVersion      = "0.3.1"
+	//defaultNetworkInstance = "vpc-1"
+	//defaultKind            = "nad"
+	//defaultCniVersion      = "0.3.1"
 	// errors
 	//errGetCr        = "cannot get resource"
 	//errUpdateStatus = "cannot update status"
@@ -71,11 +70,9 @@ const (
 // SetupWithManager sets up the controller with the Manager.
 func Setup(mgr ctrl.Manager, options *shared.Options) error {
 	r := &reconciler{
-		kind:        readinessGateKind,
 		Client:      mgr.GetClient(),
 		Scheme:      mgr.GetScheme(),
 		porchClient: options.PorchClient,
-		allocCLient: options.AllocClient,
 
 		injectors:    injectors.New(),
 		pollInterval: options.Poll,
@@ -89,10 +86,8 @@ func Setup(mgr ctrl.Manager, options *shared.Options) error {
 
 // reconciler reconciles a NetworkInstance object
 type reconciler struct {
-	kind string
 	client.Client
 	porchClient  client.Client
-	allocCLient  allocpb.AllocationClient
 	Scheme       *runtime.Scheme
 	injectors    injectors.Injectors
 	pollInterval time.Duration
@@ -134,6 +129,7 @@ func (r *reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	return ctrl.Result{}, nil
 }
 
+/*
 func hasReadinessGate(gates []porchv1alpha1.ReadinessGate, gate string) bool {
 	for i := range gates {
 		g := gates[i]
@@ -143,6 +139,7 @@ func hasReadinessGate(gates []porchv1alpha1.ReadinessGate, gate string) bool {
 	}
 	return false
 }
+*/
 
 func unsatisfiedConditions(conditions []porchv1alpha1.Condition, conditionType string) []porchv1alpha1.Condition {
 	var uc []porchv1alpha1.Condition
@@ -158,6 +155,7 @@ func unsatisfiedConditions(conditions []porchv1alpha1.Condition, conditionType s
 	return uc
 }
 
+/*
 func hasCondition(conditions []porchv1alpha1.Condition, conditionType string) (*porchv1alpha1.Condition, bool) {
 	for i := range conditions {
 		c := conditions[i]
@@ -167,6 +165,7 @@ func hasCondition(conditions []porchv1alpha1.Condition, conditionType string) (*
 	}
 	return nil, false
 }
+*/
 
 func (r *reconciler) injectNFInfo(ctx context.Context, namespacedName types.NamespacedName) error {
 	r.l = log.FromContext(ctx)
@@ -196,7 +195,7 @@ func (r *reconciler) injectNFInfo(ctx context.Context, namespacedName types.Name
 				continue
 			}
 			meta.SetStatusCondition(prConditions, metav1.Condition{Type: c.Type, Status: metav1.ConditionFalse,
-				Reason: "ErrorDuringInjection", Message: fmt.Sprintf(err.Error())})
+				Reason: "ErrorDuringInjection", Message: err.Error()})
 
 		}
 	}
