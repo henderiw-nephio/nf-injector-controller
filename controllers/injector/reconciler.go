@@ -46,13 +46,13 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/kustomize/kyaml/yaml"
+	kyaml "sigs.k8s.io/kustomize/kyaml/yaml"
 )
 
 const (
 	finalizer         = "injector.nephio.org/finalizer"
-	upfConditionType  = "nf.nephio.org.UPFDeployment."
-	ipamConditionType = "ipam.nephio.org.IPAMAllocation."
+	upfConditionType  = "nf.nephio.org.UPFDeployment"
+	ipamConditionType = "ipam.nephio.org.IPAMAllocation"
 	readinessGateKind = "nf"
 
 	defaultNetworkInstance = "vpc-1"
@@ -153,7 +153,7 @@ func unsatisfiedConditions(conditions []porchv1alpha1.Condition, conditionType s
 		// TODO: make this smarter
 		// for now, just check if it is True. It means we won't re-inject if some input changes,
 		// unless someone flips the state
-		if c.Status != porchv1alpha1.ConditionTrue && strings.HasPrefix(c.Type, conditionType) {
+		if c.Status != porchv1alpha1.ConditionTrue && strings.HasPrefix(c.Type, conditionType+".") {
 			uc = append(uc, c)
 		}
 	}
@@ -323,19 +323,13 @@ func (r *reconciler) injectNFResources(ctx context.Context, namespacedName types
 			namespace = rn.GetNamespace()
 		}
 		if rn.GetApiVersion() == "infra.nephio.org/v1alpha1" && rn.GetKind() == "ClusterContext" {
-			if clusterContext != nil {
-				return fmt.Errorf("only one ClusterContext can be in the package")
-			}
-			nStr := rn.MustString()
 			clusterContext = &infrav1alpha1.ClusterContext{}
-			if err := yaml.Unmarshal([]byte(nStr), clusterContext); err != nil {
-				return err
-			}
+			fillClusterContext(rn, clusterContext)
 		}
 	}
 
 	if clusterContext == nil {
-		return fmt.Errorf("no ClusterContext found in the package")
+		return fmt.Errorf("ClusterContext is required")
 	}
 
 	if clusterContext.Spec.SiteCode == nil || *clusterContext.Spec.SiteCode == "" {
@@ -352,10 +346,11 @@ func (r *reconciler) injectNFResources(ctx context.Context, namespacedName types
 
 	// create an IP Allocation per endpoint and per pool
 	for epName, ep := range endpoints {
-		if ep.NetworkInstance == nil || ep.NetworkName == nil || *ep.NetworkInstance != "" || *ep.NetworkName != "" {
-			// probably should log something
+		if ep == nil || ep.NetworkInstance == nil || ep.NetworkName == nil || *ep.NetworkInstance == "" || *ep.NetworkName == "" {
+			r.l.Info("skipping", "epName", epName, "ep", ep)
 			continue
 		}
+		r.l.Info("injecting IPAllocation for endpoint", "epName", epName, "ep", ep)
 		ipAllocName := strings.Join([]string{"upf", *clusterContext.Spec.SiteCode}, "-") // TODO need more discussion
 		ipamResourceName := strings.Join([]string{ipAllocName, epName}, "-")
 		ipAlloc, err := ipam.BuildIPAMAllocation(
@@ -377,14 +372,17 @@ func (r *reconciler) injectNFResources(ctx context.Context, namespacedName types
 			return errors.Wrap(err, "cannot get ipalloc rnode")
 		}
 		if i, ok := existingIPAllocations[ipamResourceName]; ok {
+			r.l.Info("replacing existing IPAllocation", "ipamResourceName", ipamResourceName, "ipAlloc", ipAlloc)
 			// exits -> replace
 			pkgBuf.Nodes[i] = ipAlloc
 		} else {
+			r.l.Info("adding new IPAllocation", "ipamResourceName", ipamResourceName, "ipAlloc", ipAlloc)
 			// add new entry
 			pkgBuf.Nodes = append(pkgBuf.Nodes, ipAlloc)
 		}
 
 		conditionType := fmt.Sprintf("%s.%s.%s.Injected", ipamConditionType, ipamResourceName, namespace)
+		r.l.Info("setting condition", "conditionType", conditionType)
 		meta.SetStatusCondition(prConditions, metav1.Condition{Type: conditionType, Status: metav1.ConditionFalse,
 			Reason: "PendingInjection", Message: "Awaiting IP allocation and injection"})
 	}
@@ -489,4 +487,17 @@ func unconvertConditions(conditions *[]metav1.Condition) []porchv1alpha1.Conditi
 	}
 
 	return prConditions
+}
+
+func fillClusterContext(rn *kyaml.RNode, cc *infrav1alpha1.ClusterContext) {
+	t := upf.MustGetValue(rn, "spec.cniConfig.cniType")
+	i := upf.MustGetValue(rn, "spec.cniConfig.masterInterface")
+	s := upf.MustGetValue(rn, "spec.siteCode")
+	cc.Spec = infrav1alpha1.ClusterContextSpec{
+		CNIConfig: &infrav1alpha1.CNIConfig{
+			CNIType:         t,
+			MasterInterface: i,
+		},
+		SiteCode: &s,
+	}
 }
