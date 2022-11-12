@@ -27,7 +27,6 @@ import (
 
 	porchv1alpha1 "github.com/GoogleContainerTools/kpt/porch/api/porch/v1alpha1"
 	"github.com/go-logr/logr"
-	"github.com/henderiw-nephio/nf-injector-controller/pkg/injector"
 	"github.com/henderiw-nephio/nf-injector-controller/pkg/injectors"
 	"github.com/henderiw-nephio/nf-injector-controller/pkg/ipam"
 	"github.com/henderiw-nephio/nf-injector-controller/pkg/resource"
@@ -123,15 +122,10 @@ func (r *reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 			Namespace: cr.Namespace,
 			Name:      cr.Name,
 		}
-		i := injector.New(&injector.Config{
-			InjectorHandler: r.injectNFInfo,
-			NamespacedName:  crName,
-			Client:          r.Client,
-		})
 
+		r.injectNFInfo(ctx, crName)
 		// run the injector when the ipam readiness gate is set
 		r.l.Info("injector running", "pr", cr.GetName())
-		r.injectors.Run(i)
 	}
 
 	return ctrl.Result{}, nil
