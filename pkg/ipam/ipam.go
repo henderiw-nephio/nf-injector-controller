@@ -84,3 +84,27 @@ func GetIPAllocationSelectorMatchLabels(source *kyaml.RNode) (map[string]string,
 	}
 	return l, nil
 }
+
+type IpamAllocation struct {
+	Obj fn.KubeObject
+}
+
+func (r *IpamAllocation) GetSpec() (*ipamv1alpha1.IPAllocationSpec, error) {
+	spec := r.Obj.GetMap("spec")
+	selectorLabels, _, err := spec.NestedStringMap("selector", "matchLabels")
+	if err != nil {
+		return nil, err
+	}
+
+	ipAllocSpec := &ipamv1alpha1.IPAllocationSpec{
+		PrefixKind:    spec.GetString("kind"),
+		AddressFamily: spec.GetString("addressFamily"),
+		Prefix:        spec.GetString("prefix"),
+		PrefixLength:  uint8(spec.GetInt("prefixLength")),
+		Selector: &metav1.LabelSelector{
+			MatchLabels: selectorLabels,
+		},
+	}
+
+	return ipAllocSpec, nil
+}
