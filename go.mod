@@ -3,6 +3,7 @@ module github.com/henderiw-nephio/nf-injector-controller
 go 1.19
 
 require (
+	github.com/GoogleContainerTools/kpt v1.0.0-beta.23
 	github.com/GoogleContainerTools/kpt-functions-sdk/go/fn v0.0.0-20221109010843-1f7d0c07a381
 	github.com/GoogleContainerTools/kpt/porch/api v0.0.0-20221109171719-946fa8175c0c
 	github.com/go-logr/logr v1.2.3
@@ -86,6 +87,7 @@ require (
 	k8s.io/kube-openapi v0.0.0-20220803162953-67bda5d908f1 // indirect
 	k8s.io/utils v0.0.0-20220728103510-ee6ede2d64ed // indirect
 	sigs.k8s.io/json v0.0.0-20220713155537-f223a00ba0e2 // indirect
+	sigs.k8s.io/kustomize/api v0.12.1 // indirect
 	sigs.k8s.io/structured-merge-diff/v4 v4.2.3 // indirect
 	sigs.k8s.io/yaml v1.3.0 // indirect
 )
