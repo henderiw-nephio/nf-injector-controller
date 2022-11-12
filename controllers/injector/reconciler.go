@@ -18,35 +18,43 @@ package injector
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
 
+	"k8s.io/apimachinery/pkg/api/meta"
+
+	kptfile "github.com/GoogleContainerTools/kpt/pkg/api/kptfile/v1"
 	porchv1alpha1 "github.com/GoogleContainerTools/kpt/porch/api/porch/v1alpha1"
 	"github.com/go-logr/logr"
-	"github.com/henderiw-nephio/nf-injector-controller/pkg/injector"
 	"github.com/henderiw-nephio/nf-injector-controller/pkg/injectors"
 	"github.com/henderiw-nephio/nf-injector-controller/pkg/ipam"
 	"github.com/henderiw-nephio/nf-injector-controller/pkg/resource"
 	"github.com/henderiw-nephio/nf-injector-controller/pkg/shared"
 	"github.com/henderiw-nephio/nf-injector-controller/pkg/upf"
+	infrav1alpha1 "github.com/nephio-project/nephio-controller-poc/apis/infra/v1alpha1"
 	"github.com/nephio-project/nephio-controller-poc/pkg/porch"
 	nfv1alpha1 "github.com/nephio-project/nephio-pocs/nephio-5gc-controller/apis/nf/v1alpha1"
 	ipamv1alpha1 "github.com/nokia/k8s-ipam/apis/ipam/v1alpha1"
 	"github.com/nokia/k8s-ipam/pkg/alloc/allocpb"
 	"github.com/pkg/errors"
-	"k8s.io/apimachinery/pkg/api/equality"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/kustomize/kyaml/kio"
+	kyaml "sigs.k8s.io/kustomize/kyaml/yaml"
 )
 
 const (
-	finalizer              = "injector.nephio.org/finalizer"
-	readinessGateKind      = "nf"
+	finalizer         = "injector.nephio.org/finalizer"
+	upfConditionType  = "nf.nephio.org.UPFDeployment"
+	ipamConditionType = "ipam.nephio.org.IPAMAllocation"
+	readinessGateKind = "nf"
+
 	defaultNetworkInstance = "vpc-1"
 	defaultKind            = "nad"
 	defaultCniVersion      = "0.3.1"
@@ -108,28 +116,20 @@ func (r *reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		return ctrl.Result{}, nil
 	}
 
-	crName := types.NamespacedName{
-		Namespace: cr.Namespace,
-		Name:      cr.Name,
-	}
-	i := injector.New(&injector.Config{
-		InjectorHandler: r.injectNFInfo,
-		NamespacedName:  crName,
-		Client:          r.Client,
-	})
+	upfConditions := unsatisfiedConditions(cr.Status.Conditions, upfConditionType)
 
-	hasReadinessGateForKind := hasReadinessGate(cr.Spec.ReadinessGates, r.kind)
-	// if no IPAM readiness gate, delete the injector if it existed or not
-	// we can stop the reconciliation in this case since there is nothing more to do
-	if !hasReadinessGateForKind {
-		r.injectors.Stop(i)
-		r.l.Info("injector stopped", "pr", cr.GetName())
-		return ctrl.Result{}, nil
-	}
+	if len(upfConditions) > 0 {
+		crName := types.NamespacedName{
+			Namespace: cr.Namespace,
+			Name:      cr.Name,
+		}
 
-	// run the injector when the ipam readiness gate is set
-	r.l.Info("injector running", "pr", cr.GetName())
-	r.injectors.Run(i)
+		r.l.Info("injector running", "pr", cr.GetName())
+		if err := r.injectNFInfo(ctx, crName); err != nil {
+			r.l.Error(err, "injection error")
+			return ctrl.Result{}, err
+		}
+	}
 
 	return ctrl.Result{}, nil
 }
@@ -142,6 +142,20 @@ func hasReadinessGate(gates []porchv1alpha1.ReadinessGate, gate string) bool {
 		}
 	}
 	return false
+}
+
+func unsatisfiedConditions(conditions []porchv1alpha1.Condition, conditionType string) []porchv1alpha1.Condition {
+	var uc []porchv1alpha1.Condition
+	for _, c := range conditions {
+		// TODO: make this smarter
+		// for now, just check if it is True. It means we won't re-inject if some input changes,
+		// unless someone flips the state
+		if c.Status != porchv1alpha1.ConditionTrue && strings.HasPrefix(c.Type, conditionType+".") {
+			uc = append(uc, c)
+		}
+	}
+
+	return uc
 }
 
 func hasCondition(conditions []porchv1alpha1.Condition, conditionType string) (*porchv1alpha1.Condition, bool) {
@@ -158,9 +172,6 @@ func (r *reconciler) injectNFInfo(ctx context.Context, namespacedName types.Name
 	r.l = log.FromContext(ctx)
 	r.l.Info("injector function", "name", namespacedName.String())
 
-	existingIPAllocations := map[string]int{}
-	existingUPFDeployments := map[string]int{}
-
 	origPr := &porchv1alpha1.PackageRevision{}
 	if err := r.porchClient.Get(ctx, namespacedName, origPr); err != nil {
 		return err
@@ -168,14 +179,111 @@ func (r *reconciler) injectNFInfo(ctx context.Context, namespacedName types.Name
 
 	pr := origPr.DeepCopy()
 
+	prConditions := convertConditions(pr.Status.Conditions)
+
+	prResources, pkgBuf, err := r.injectNFResources(ctx, namespacedName, prConditions, pr)
+	if err != nil {
+		if pkgBuf == nil {
+			return err
+		}
+		// for now just assume the error applies to all UPFDeployments
+		// we should only have one for the proof-of-concept
+		for _, c := range *prConditions {
+			if !strings.HasPrefix(c.Type, upfConditionType) {
+				continue
+			}
+			if meta.IsStatusConditionTrue(*prConditions, c.Type) {
+				continue
+			}
+			meta.SetStatusCondition(prConditions, metav1.Condition{Type: c.Type, Status: metav1.ConditionFalse,
+				Reason: "ErrorDuringInjection", Message: fmt.Sprintf(err.Error())})
+
+		}
+	}
+
+	pr.Status.Conditions = unconvertConditions(prConditions)
+
+	// conditions are stored in the Kptfile right now
+	for i, n := range pkgBuf.Nodes {
+		if n.GetKind() == "Kptfile" {
+			// we need to update the status
+			nStr := n.MustString()
+			var kf kptfile.KptFile
+			if err := kyaml.Unmarshal([]byte(nStr), &kf); err != nil {
+				return err
+			}
+			if kf.Status == nil {
+				kf.Status = &kptfile.Status{}
+			}
+			kf.Status.Conditions = conditionsToKptfile(prConditions)
+
+			kfBytes, _ := kyaml.Marshal(kf)
+			node := kyaml.MustParse(string(kfBytes))
+			pkgBuf.Nodes[i] = node
+		}
+	}
+
+	newResources, err := porch.CreateUpdatedResources(prResources.Spec.Resources, pkgBuf)
+	if err != nil {
+		return errors.Wrap(err, "cannot update package revision resources")
+	}
+	prResources.Spec.Resources = newResources
+	if err = r.porchClient.Update(ctx, prResources); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (r *reconciler) injectNFResources(ctx context.Context, namespacedName types.NamespacedName,
+	prConditions *[]metav1.Condition,
+	pr *porchv1alpha1.PackageRevision) (*porchv1alpha1.PackageRevisionResources, *kio.PackageBuffer, error) {
+
 	prResources := &porchv1alpha1.PackageRevisionResources{}
 	if err := r.porchClient.Get(ctx, namespacedName, prResources); err != nil {
-		return err
+		return nil, nil, err
 	}
 
 	pkgBuf, err := porch.ResourcesToPackageBuffer(prResources.Spec.Resources)
 	if err != nil {
-		return err
+		return prResources, nil, err
+	}
+
+	// retrieve the corresponding FiveGCoreTopology resource
+	fiveGCoreId := types.NamespacedName{Namespace: pr.Namespace}
+	if n, ok := pr.Annotations["nf.nephio.org/topology"]; ok {
+		fiveGCoreId.Name = n
+	} else {
+		return prResources, pkgBuf, fmt.Errorf("missing %q annotation", "nf.nephio.org/topology")
+	}
+
+	var fiveGCore nfv1alpha1.FiveGCoreTopology
+	if err := r.Get(ctx, fiveGCoreId, &fiveGCore); err != nil {
+		return prResources, pkgBuf, err
+	}
+
+	// find the corresponding UPFSpec in the FiveGCoreTopology resource
+	clusterSetName, ok := pr.Annotations["nf.nephio.org/cluster-set"]
+	if !ok {
+		return prResources, pkgBuf, fmt.Errorf("missing %q annotation", "nf.nephio.org/cluster-set")
+	}
+
+	var upfSpec *nfv1alpha1.UPFSpec
+	for i := range fiveGCore.Spec.UPFs {
+		if fiveGCore.Spec.UPFs[i].Name == clusterSetName {
+			upfSpec = &fiveGCore.Spec.UPFs[i].UPF
+			break
+		}
+	}
+
+	if upfSpec == nil {
+		return prResources, pkgBuf, fmt.Errorf("did not find UPF %q in FiveGCoreTopology", clusterSetName)
+	}
+
+	// retrieve the corresponding UPFClass resource
+	var upfClass nfv1alpha1.UPFClass
+	if err := r.Get(ctx, client.ObjectKey{Name: upfSpec.UPFClassName}, &upfClass); err != nil {
+		return prResources, pkgBuf, err
 	}
 
 	// Option 1
@@ -183,88 +291,126 @@ func (r *reconciler) injectNFInfo(ctx context.Context, namespacedName types.Name
 	// find the Cluster Context -> this hsould give us info on interface, etc
 	// allocate IP(s) based on this information
 
-	n6pool := nfv1alpha1.Pool{}
+	existingIPAllocations := map[string]int{}
+	existingUPFDeployments := map[string]int{}
+
+	// for now we only support exactly one N3, N4, N6, and zero or one N9
+	if len(upfSpec.N3) != 1 {
+		return prResources, pkgBuf, fmt.Errorf("exactly one N3 endpoint should be defined")
+	}
+
+	if len(upfSpec.N4) != 1 {
+		return prResources, pkgBuf, fmt.Errorf("exactly one N4 endpoint should be defined")
+	}
+
+	if len(upfSpec.N6) != 1 {
+		return prResources, pkgBuf, fmt.Errorf("exactly one N6 endpoint should be defined")
+	}
+
+	if len(upfSpec.N9) > 1 {
+		return prResources, pkgBuf, fmt.Errorf("at most one N9 endpoint should be defined")
+	}
+
+	n6pool := upfSpec.N6[0].UEPool
+
+	if n6pool.NetworkInstance == nil || *n6pool.NetworkInstance == "" {
+		return prResources, pkgBuf, fmt.Errorf("N6.NetworkInstance is required")
+	}
+
+	if n6pool.NetworkName == nil || *n6pool.NetworkName == "" {
+		return prResources, pkgBuf, fmt.Errorf("N6.NetworkName is required")
+	}
+
 	endpoints := map[string]*nfv1alpha1.Endpoint{
-		"n3": nil,
-		"n4": nil,
-		"n6": nil,
+		"n3": &upfSpec.N3[0],
+		"n4": &upfSpec.N4[0],
+		"n6": &upfSpec.N6[0].Endpoint,
 		"n9": nil,
 	}
+	if len(upfSpec.N9) > 0 {
+		endpoints["n9"] = &upfSpec.N9[0]
+	}
+
 	namespace := "default"
-	dnn := ""
-	capacity := nfv1alpha1.UPFCapacity{}
-	region := ""
+	var clusterContext *infrav1alpha1.ClusterContext
 	for i, rn := range pkgBuf.Nodes {
 		if rn.GetApiVersion() == "ipam.nephio.org/v1alpha1" && rn.GetKind() == "IPAllocation" {
 			existingIPAllocations[rn.GetName()] = i
 		}
 		if rn.GetApiVersion() == "nf.nephio.org/v1alpha1" && rn.GetKind() == "UPFDeployment" {
 			existingUPFDeployments[rn.GetName()] = i
-		}
-		if rn.GetApiVersion() == "nf.nephio.org/v1alpha1" && rn.GetKind() == "FiveGCoreTopology" {
 			namespace = rn.GetNamespace()
-			if region, err = upf.GetRegion(rn); err != nil {
-				return err
-			}
-			dnn = upf.GetDnn(rn)
-			capacity = upf.GetCapacity(rn)
-			for epName := range endpoints {
-				if epName == "n6" {
-					// it is assumed n6 is needed this i why an err is returned, when n6 is not found
-					n6ep, err := upf.GetN6Endpoint(epName, rn)
-					if err != nil {
-						return err
-					}
-					endpoints[epName] = &n6ep.Endpoint
-					n6pool = n6ep.UEPool
-				} else {
-					ep, err := upf.GetEndpoint(epName, rn)
-					if err != nil {
-						return err
-					}
-					endpoints[epName] = ep
-				}
-			}
 		}
+		if rn.GetApiVersion() == "infra.nephio.org/v1alpha1" && rn.GetKind() == "ClusterContext" {
+			clusterContext = &infrav1alpha1.ClusterContext{}
+			fillClusterContext(rn, clusterContext)
+		}
+	}
+
+	if clusterContext == nil {
+		return prResources, pkgBuf, fmt.Errorf("ClusterContext is required")
+	}
+
+	if clusterContext.Spec.SiteCode == nil || *clusterContext.Spec.SiteCode == "" {
+		return prResources, pkgBuf, fmt.Errorf("CluterContext.Spec.SiteCode is required")
+	}
+
+	if len(existingUPFDeployments) == 0 {
+		return prResources, pkgBuf, fmt.Errorf("no existing UPFDeployment found in the package")
+	}
+
+	if len(existingUPFDeployments) > 1 {
+		return prResources, pkgBuf, fmt.Errorf("only a single UPFDeployment should be in the package")
 	}
 
 	// create an IP Allocation per endpoint and per pool
 	for epName, ep := range endpoints {
-		if *ep.NetworkInstance != "" && *ep.NetworkName != "" {
-			ipAllocName := strings.Join([]string{"upf", region}, "-") // TODO need more discussion
-			ipAlloc, err := ipam.BuildIPAMAllocation(
-				ipAllocName,
-				types.NamespacedName{
-					Name:      epName,
-					Namespace: namespace,
-				},
-				ipamv1alpha1.IPAllocationSpec{
-					PrefixKind: string(ipamv1alpha1.PrefixKindNetwork),
-					Selector: &metav1.LabelSelector{
-						MatchLabels: map[string]string{
-							ipamv1alpha1.NephioNetworkInstanceKey: *ep.NetworkInstance,
-							ipamv1alpha1.NephioNetworkNameKey:     *ep.NetworkName,
-						},
-					},
-				})
-			if err != nil {
-				return errors.Wrap(err, "cannot get ipalloc rnode")
-			}
-			if i, ok := existingIPAllocations[strings.Join([]string{ipAllocName, epName}, "-")]; ok {
-				// exits -> replace
-				pkgBuf.Nodes[i] = ipAlloc
-			} else {
-				// add new entry
-				pkgBuf.Nodes = append(pkgBuf.Nodes, ipAlloc)
-			}
+		if ep == nil || ep.NetworkInstance == nil || ep.NetworkName == nil || *ep.NetworkInstance == "" || *ep.NetworkName == "" {
+			r.l.Info("skipping", "epName", epName, "ep", ep)
+			continue
 		}
+		r.l.Info("injecting IPAllocation for endpoint", "epName", epName, "ep", ep)
+		ipAllocName := strings.Join([]string{"upf", *clusterContext.Spec.SiteCode}, "-") // TODO need more discussion
+		ipamResourceName := strings.Join([]string{ipAllocName, epName}, "-")
+		ipAlloc, err := ipam.BuildIPAMAllocation(
+			ipAllocName,
+			types.NamespacedName{
+				Name:      epName,
+				Namespace: namespace,
+			},
+			ipamv1alpha1.IPAllocationSpec{
+				PrefixKind: string(ipamv1alpha1.PrefixKindNetwork),
+				Selector: &metav1.LabelSelector{
+					MatchLabels: map[string]string{
+						ipamv1alpha1.NephioNetworkInstanceKey: *ep.NetworkInstance,
+						ipamv1alpha1.NephioNetworkNameKey:     *ep.NetworkName,
+					},
+				},
+			})
+		if err != nil {
+			return prResources, pkgBuf, errors.Wrap(err, "cannot get ipalloc rnode")
+		}
+		if i, ok := existingIPAllocations[ipamResourceName]; ok {
+			r.l.Info("replacing existing IPAllocation", "ipamResourceName", ipamResourceName, "ipAlloc", ipAlloc)
+			// exits -> replace
+			pkgBuf.Nodes[i] = ipAlloc
+		} else {
+			r.l.Info("adding new IPAllocation", "ipamResourceName", ipamResourceName, "ipAlloc", ipAlloc)
+			// add new entry
+			pkgBuf.Nodes = append(pkgBuf.Nodes, ipAlloc)
+		}
+
+		conditionType := fmt.Sprintf("%s.%s.%s.Injected", ipamConditionType, ipamResourceName, namespace)
+		r.l.Info("setting condition", "conditionType", conditionType)
+		meta.SetStatusCondition(prConditions, metav1.Condition{Type: conditionType, Status: metav1.ConditionFalse,
+			Reason: "PendingInjection", Message: "Awaiting IP allocation and injection"})
 	}
 
 	ps, err := strconv.Atoi(*n6pool.PrefixSize)
 	if err != nil {
-		return err
+		return prResources, pkgBuf, err
 	}
-	ipPoolAllocName := strings.Join([]string{"upf", region}, "-")
+	ipPoolAllocName := strings.Join([]string{"upf", *clusterContext.Spec.SiteCode}, "-")
 	ipAlloc, err := ipam.BuildIPAMAllocation(
 		ipPoolAllocName,
 		types.NamespacedName{
@@ -282,7 +428,7 @@ func (r *reconciler) injectNFInfo(ctx context.Context, namespacedName types.Name
 			},
 		})
 	if err != nil {
-		return errors.Wrap(err, "cannot get ipalloc rnode")
+		return prResources, pkgBuf, errors.Wrap(err, "cannot get ipalloc rnode")
 	}
 	if i, ok := existingIPAllocations[strings.Join([]string{ipPoolAllocName, "n6pool"}, "-")]; ok {
 		// exits -> replace
@@ -292,64 +438,90 @@ func (r *reconciler) injectNFInfo(ctx context.Context, namespacedName types.Name
 		pkgBuf.Nodes = append(pkgBuf.Nodes, ipAlloc)
 	}
 
-	upfDeploymentName := strings.Join([]string{"upf", region}, "-")
+	upfDeploymentName := strings.Join([]string{"upf", *clusterContext.Spec.SiteCode}, "-")
 	upfDeployment, err := upf.BuildUPFDeployment(
 		types.NamespacedName{
 			Name:      upfDeploymentName,
 			Namespace: namespace,
 		},
-		upf.BuildUPFDeploymentSpec(endpoints, dnn, capacity),
+		upf.BuildUPFDeploymentSpec(endpoints, upfSpec.N6[0].DNN, upfSpec.Capacity),
 	)
 	if err != nil {
-		return errors.Wrap(err, "cannot build upfDeployment rnode")
+		return prResources, pkgBuf, errors.Wrap(err, "cannot build upfDeployment rnode")
 	}
+	conditionType := fmt.Sprintf("%s.%s.%s.Injected", upfConditionType, upfDeploymentName, namespace)
 	if i, ok := existingUPFDeployments[upfDeploymentName]; ok {
-		// exits -> replace
-		pkgBuf.Nodes[i] = upfDeployment
-	} else {
-		// add new entry
-		pkgBuf.Nodes = append(pkgBuf.Nodes, upfDeployment)
+		n := pkgBuf.Nodes[i]
+		// set the spec on the one in the package to match our spec
+		field := upfDeployment.Field("spec")
+		if err := n.SetMapField(field.Value, "spec"); err != nil {
+			r.l.Error(err, "could not set UPFDeployment.Spec")
+			meta.SetStatusCondition(prConditions, metav1.Condition{Type: conditionType, Status: metav1.ConditionFalse,
+				Reason: "ResourceSpecErr", Message: err.Error()})
+			return prResources, pkgBuf, err
+		}
+
+		r.l.Info("setting ipam condition", "conditionType", conditionType)
+		meta.SetStatusCondition(prConditions, metav1.Condition{Type: conditionType, Status: metav1.ConditionTrue,
+			Reason: "ResourceInjected", Message: fmt.Sprintf("injected from FiveGCoreTopology %q UPF name %q",
+				fiveGCore.Name, clusterSetName)})
+
 	}
 
-	newResources, err := porch.CreateUpdatedResources(prResources.Spec.Resources, pkgBuf)
-	if err != nil {
-		return errors.Wrap(err, "cannot update package revision resources")
-	}
-	prResources.Spec.Resources = newResources
-	if err = r.porchClient.Update(ctx, prResources); err != nil {
-		return err
-	}
+	return prResources, pkgBuf, nil
+}
 
-	hasReadinessGateForKind := hasReadinessGate(pr.Spec.ReadinessGates, r.kind)
-	kindCondition, found := hasCondition(pr.Status.Conditions, r.kind)
-	if !hasReadinessGateForKind {
-		pr.Spec.ReadinessGates = append(pr.Spec.ReadinessGates, porchv1alpha1.ReadinessGate{
-			ConditionType: "bar",
+// copied from package deployment controller - clearly we need some libraries or
+// to directly use the K8s meta types
+func convertConditions(conditions []porchv1alpha1.Condition) *[]metav1.Condition {
+	var result []metav1.Condition
+	for _, c := range conditions {
+		result = append(result, metav1.Condition{
+			Type:    c.Type,
+			Reason:  c.Reason,
+			Status:  metav1.ConditionStatus(c.Status),
+			Message: c.Message,
+		})
+	}
+	return &result
+}
+
+func conditionsToKptfile(conditions *[]metav1.Condition) []kptfile.Condition {
+	var prConditions []kptfile.Condition
+	for _, c := range *conditions {
+		prConditions = append(prConditions, kptfile.Condition{
+			Type:    c.Type,
+			Reason:  c.Reason,
+			Status:  kptfile.ConditionStatus(c.Status),
+			Message: c.Message,
+		})
+	}
+	return prConditions
+}
+
+func unconvertConditions(conditions *[]metav1.Condition) []porchv1alpha1.Condition {
+	var prConditions []porchv1alpha1.Condition
+	for _, c := range *conditions {
+		prConditions = append(prConditions, porchv1alpha1.Condition{
+			Type:    c.Type,
+			Reason:  c.Reason,
+			Status:  porchv1alpha1.ConditionStatus(c.Status),
+			Message: c.Message,
 		})
 	}
 
-	// If the condition is not already set on the PackageRevision, set it. Otherwise just
-	// make sure that the status is "True".
-	if !found {
-		pr.Status.Conditions = append(pr.Status.Conditions, porchv1alpha1.Condition{
-			Type:   "foo",
-			Status: porchv1alpha1.ConditionTrue,
-		})
-	} else {
-		kindCondition.Status = porchv1alpha1.ConditionTrue
-	}
+	return prConditions
+}
 
-	// If nothing changed, then no need to update.
-	// TODO: For some reason using equality.Semantic.DeepEqual and the full PackageRevision always reports a diff.
-	// We should find out why.
-	if equality.Semantic.DeepEqual(origPr.Spec.ReadinessGates, pr.Spec.ReadinessGates) &&
-		equality.Semantic.DeepEqual(origPr.Status, pr.Status) {
-		return nil
+func fillClusterContext(rn *kyaml.RNode, cc *infrav1alpha1.ClusterContext) {
+	t := upf.MustGetValue(rn, "spec.cniConfig.cniType")
+	i := upf.MustGetValue(rn, "spec.cniConfig.masterInterface")
+	s := upf.MustGetValue(rn, "spec.siteCode")
+	cc.Spec = infrav1alpha1.ClusterContextSpec{
+		CNIConfig: &infrav1alpha1.CNIConfig{
+			CNIType:         t,
+			MasterInterface: i,
+		},
+		SiteCode: &s,
 	}
-
-	if err := r.Update(ctx, pr); err != nil {
-		return errors.Wrap(err, "cannot update packagerevision")
-	}
-
-	return nil
 }

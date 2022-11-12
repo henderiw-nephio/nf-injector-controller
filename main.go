@@ -28,7 +28,9 @@ import (
 	porchv1alpha1 "github.com/GoogleContainerTools/kpt/porch/api/porch/v1alpha1"
 	"github.com/henderiw-nephio/nf-injector-controller/controllers"
 	"github.com/henderiw-nephio/nf-injector-controller/pkg/shared"
+	infrav1alpha1 "github.com/nephio-project/nephio-controller-poc/apis/infra/v1alpha1"
 	"github.com/nephio-project/nephio-controller-poc/pkg/porch"
+	nfv1alpha1 "github.com/nephio-project/nephio-pocs/nephio-5gc-controller/apis/nf/v1alpha1"
 	ipamv1alpha1 "github.com/nokia/k8s-ipam/apis/ipam/v1alpha1"
 	"github.com/nokia/k8s-ipam/pkg/alloc/alloc"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -50,6 +52,8 @@ func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(ipamv1alpha1.AddToScheme(scheme))
 	utilruntime.Must(porchv1alpha1.AddToScheme(scheme))
+	utilruntime.Must(infrav1alpha1.AddToScheme(scheme))
+	utilruntime.Must(nfv1alpha1.AddToScheme(scheme))
 
 	//+kubebuilder:scaffold:scheme
 }

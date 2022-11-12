@@ -1,5 +1,5 @@
 VERSION ?= latest
-REGISTRY ?= yndd
+REGISTRY ?= gcr.io/jbelamaric-public
 PROJECT ?= nf-injector
 
 KPT_BLUEPRINT_CFG_DIR ?= blueprint/fn-config
@@ -50,9 +50,9 @@ manifests: controller-gen kpt kptgen ## Generate WebhookConfiguration, ClusterRo
 	$(CONTROLLER_GEN) rbac:roleName=manager-role crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases
 	mkdir -p ${KPT_BLUEPRINT_CFG_DIR}
 	mkdir -p ${KPT_BLUEPRINT_PKG_DIR}/app
-	kpt pkg init ${KPT_BLUEPRINT_PKG_DIR} --description "${PROJECT} controller"
-	kpt pkg init ${KPT_BLUEPRINT_PKG_DIR}/app --description "${PROJECT} app"
-	kptgen apply config ${KPT_BLUEPRINT_PKG_DIR} --fn-config-dir ${KPT_BLUEPRINT_CFG_DIR}
+	$(KPT) pkg init ${KPT_BLUEPRINT_PKG_DIR} --description "${PROJECT} controller"
+	$(KPT) pkg init ${KPT_BLUEPRINT_PKG_DIR}/app --description "${PROJECT} app"
+	$(KPTGEN) apply config ${KPT_BLUEPRINT_PKG_DIR} --fn-config-dir ${KPT_BLUEPRINT_CFG_DIR}
 	rm ${KPT_BLUEPRINT_PKG_DIR}/package-context.yaml
 	rm ${KPT_BLUEPRINT_PKG_DIR}/app/package-context.yaml
 .PHONY: generate
