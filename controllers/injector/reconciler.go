@@ -111,6 +111,8 @@ func (r *reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		return ctrl.Result{}, nil
 	}
 
+	r.l.Info("cr conditons", "conditions", cr.Status.Conditions)
+
 	upfConditions := unsatisfiedConditions(cr.Status.Conditions, upfConditionType)
 
 	if len(upfConditions) > 0 {

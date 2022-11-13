@@ -1,5 +1,5 @@
 VERSION ?= latest
-REGISTRY ?= gcr.io/jbelamaric-public
+REGISTRY ?= yndd
 PROJECT ?= nf-injector
 
 KPT_BLUEPRINT_CFG_DIR ?= blueprint/fn-config

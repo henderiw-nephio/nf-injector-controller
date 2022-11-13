@@ -24,3 +24,12 @@ rules:
   - patch
   - create
   - delete
+- apiGroups:
+  - nf.nephio.org
+  resources:
+  - fivegcoretopologies
+  - upfclasses
+  verbs:
+  - get
+  - list
+  - watch
