@@ -335,14 +335,15 @@ func (r *reconciler) injectNFResources(ctx context.Context, namespacedName types
 	}
 
 	namespace := "default"
-	//upfDeploymentName := "" // will fill in from package, only one allowed now
+	upfDeploymentName := "" // will fill in from package, only one allowed now
 	var clusterContext *infrav1alpha1.ClusterContext
 	for i, rn := range pkgBuf.Nodes {
 		if rn.GetApiVersion() == "ipam.nephio.org/v1alpha1" && rn.GetKind() == "IPAllocation" {
 			existingIPAllocations[rn.GetName()] = i
 		}
 		if rn.GetApiVersion() == "nf.nephio.org/v1alpha1" && rn.GetKind() == "UPFDeployment" {
-			existingUPFDeployments["dummy"] = i
+			upfDeploymentName = rn.GetName()
+			existingUPFDeployments[rn.GetName()] = i
 			if rn.GetNamespace() != "" {
 				namespace = rn.GetNamespace()
 			}
@@ -464,7 +465,7 @@ func (r *reconciler) injectNFResources(ctx context.Context, namespacedName types
 
 	upfDeployment, err := upf.BuildUPFDeployment(
 		types.NamespacedName{
-			Name:      GetNfName(*clusterContext.Spec.SiteCode),
+			Name:      upfDeploymentName,
 			Namespace: namespace,
 		},
 		upf.BuildUPFDeploymentSpec(endpoints, upfSpec.N6[0].DNN, upfSpec.Capacity),
@@ -475,12 +476,10 @@ func (r *reconciler) injectNFResources(ctx context.Context, namespacedName types
 	r.l.Info("upfDeployment", "upfDeployment", upfDeployment)
 
 	r.l.Info("existingUPFDeployments", "existingUPFDeployments", existingUPFDeployments)
-	//conditionType := fmt.Sprintf("%s.%s.%s.Injected", upfConditionType, GetNfName(*clusterContext.Spec.SiteCode), namespace)
-	// TODO this is a hardcode hack for now
-	conditionType := fmt.Sprintf("%s.%s.%s.Injected", "nf.nephio.org", "UPFDeployment", "upf-deployment")
-	if i, ok := existingUPFDeployments["dummy"]; ok {
+	conditionType := fmt.Sprintf("%s.%s.Injected", upfConditionType, upfDeploymentName)
+	if i, ok := existingUPFDeployments[upfDeploymentName]; ok {
 		// TODO we always come here, needs a better startegy
-		r.l.Info("replacing existing UPFDeployment", "upfDeploymentName", GetNfName(*clusterContext.Spec.SiteCode), "upfDeployment", upfDeployment)
+		r.l.Info("replacing existing UPFDeployment", "upfDeploymentName", upfDeploymentName, "upfDeployment", upfDeployment)
 
 		//pkgBuf.Nodes[i] = upfDeployment
 		// TBD with John why we dont do this
