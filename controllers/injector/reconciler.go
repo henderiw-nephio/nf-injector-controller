@@ -473,7 +473,9 @@ func (r *reconciler) injectNFResources(ctx context.Context, namespacedName types
 	r.l.Info("upfDeployment", "upfDeployment", upfDeployment)
 
 	r.l.Info("existingUPFDeployments", "existingUPFDeployments", existingUPFDeployments)
-	conditionType := fmt.Sprintf("%s.%s.%s.Injected", upfConditionType, GetNfName(*clusterContext.Spec.SiteCode), namespace)
+	//conditionType := fmt.Sprintf("%s.%s.%s.Injected", upfConditionType, GetNfName(*clusterContext.Spec.SiteCode), namespace)
+	// TODO this is a hardcode hack for now
+	conditionType := fmt.Sprintf("%s.%s.%s.Injected", "nf.nephio.org", "UPFDeployment", "upf-deployment")
 	if i, ok := existingUPFDeployments["dummy"]; ok {
 		// TODO we always come here, needs a better startegy
 		r.l.Info("replacing existing UPFDeployment", "upfDeploymentName", GetNfName(*clusterContext.Spec.SiteCode), "upfDeployment", upfDeployment)
