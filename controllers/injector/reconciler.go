@@ -104,11 +104,13 @@ func (r *reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	if err := r.Get(ctx, req.NamespacedName, cr); err != nil {
 		// There's no need to requeue if we no longer exist. Otherwise we'll be
 		// requeued implicitly because we return an error.
-		if resource.IgnoreNotFound(err) != nil {
+		if client.IgnoreNotFound(err) != nil {
 			r.l.Error(err, "cannot get resource")
-			return ctrl.Result{}, errors.Wrap(resource.IgnoreNotFound(err), "cannot get resource")
+			return ctrl.Result{}, err
 		}
+		r.l.Info("cannot get resource, probably deleted", "error", err.Error())
 		return ctrl.Result{}, nil
+
 	}
 
 	r.l.Info("cr conditons", "conditions", cr.Status.Conditions)
