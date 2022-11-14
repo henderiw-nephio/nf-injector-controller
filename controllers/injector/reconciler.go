@@ -104,11 +104,13 @@ func (r *reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	if err := r.Get(ctx, req.NamespacedName, cr); err != nil {
 		// There's no need to requeue if we no longer exist. Otherwise we'll be
 		// requeued implicitly because we return an error.
-		if resource.IgnoreNotFound(err) != nil {
+		if client.IgnoreNotFound(err) != nil {
 			r.l.Error(err, "cannot get resource")
-			return ctrl.Result{}, errors.Wrap(resource.IgnoreNotFound(err), "cannot get resource")
+			return ctrl.Result{}, err
 		}
+		r.l.Info("cannot get resource, probably deleted", "error", err.Error())
 		return ctrl.Result{}, nil
+
 	}
 
 	r.l.Info("cr conditons", "conditions", cr.Status.Conditions)
@@ -473,7 +475,9 @@ func (r *reconciler) injectNFResources(ctx context.Context, namespacedName types
 	r.l.Info("upfDeployment", "upfDeployment", upfDeployment)
 
 	r.l.Info("existingUPFDeployments", "existingUPFDeployments", existingUPFDeployments)
-	conditionType := fmt.Sprintf("%s.%s.%s.Injected", upfConditionType, GetNfName(*clusterContext.Spec.SiteCode), namespace)
+	//conditionType := fmt.Sprintf("%s.%s.%s.Injected", upfConditionType, GetNfName(*clusterContext.Spec.SiteCode), namespace)
+	// TODO this is a hardcode hack for now
+	conditionType := fmt.Sprintf("%s.%s.%s.Injected", "nf.nephio.org", "UPFDeployment", "upf-deployment")
 	if i, ok := existingUPFDeployments["dummy"]; ok {
 		// TODO we always come here, needs a better startegy
 		r.l.Info("replacing existing UPFDeployment", "upfDeploymentName", GetNfName(*clusterContext.Spec.SiteCode), "upfDeployment", upfDeployment)
