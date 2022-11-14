@@ -333,6 +333,7 @@ func (r *reconciler) injectNFResources(ctx context.Context, namespacedName types
 	}
 
 	namespace := "default"
+	upfDeploymentName := "" // will fill in from package, only one allowed now
 	var clusterContext *infrav1alpha1.ClusterContext
 	for i, rn := range pkgBuf.Nodes {
 		if rn.GetApiVersion() == "ipam.nephio.org/v1alpha1" && rn.GetKind() == "IPAllocation" {
@@ -502,6 +503,7 @@ func (r *reconciler) injectNFResources(ctx context.Context, namespacedName types
 	conditionType := fmt.Sprintf("%s.%s.%s.Injected", upfConditionType, GetNfName(*clusterContext.Spec.SiteCode), namespace)
 	if i, ok := existingUPFDeployments[GetNfName(*clusterContext.Spec.SiteCode)]; ok {
 		r.l.Info("replacing existing UPFDeployment", "upfDeploymentName", GetNfName(*clusterContext.Spec.SiteCode), "upfDeployment", upfDeployment)
+
 		n := pkgBuf.Nodes[i]
 		// set the spec on the one in the package to match our spec
 		field := upfDeployment.Field("spec")
@@ -511,6 +513,12 @@ func (r *reconciler) injectNFResources(ctx context.Context, namespacedName types
 				Reason: "ResourceSpecErr", Message: err.Error()})
 			return prResources, pkgBuf, err
 		}
+
+		r.l.Info("setting condition", "conditionType", conditionType)
+		meta.SetStatusCondition(prConditions, metav1.Condition{Type: conditionType, Status: metav1.ConditionTrue,
+			Reason: "ResourceInjected", Message: fmt.Sprintf("injected from FiveGCoreTopology %q UPF name %q",
+				fiveGCore.Name, clusterSetName)})
+
 	}
 	r.l.Info("setting upfdeployment condition", "conditionType", conditionType)
 	meta.SetStatusCondition(prConditions, metav1.Condition{Type: conditionType, Status: metav1.ConditionTrue,
