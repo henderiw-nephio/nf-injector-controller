@@ -1,4 +1,5 @@
 VERSION ?= latest
+#REGISTRY ?= yndd
 REGISTRY ?= gcr.io/jbelamaric-public
 PROJECT ?= nf-injector
 

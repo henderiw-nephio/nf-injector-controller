@@ -340,7 +340,7 @@ func (r *reconciler) injectNFResources(ctx context.Context, namespacedName types
 			existingIPAllocations[rn.GetName()] = i
 		}
 		if rn.GetApiVersion() == "nf.nephio.org/v1alpha1" && rn.GetKind() == "UPFDeployment" {
-			existingUPFDeployments[rn.GetName()] = i
+			existingUPFDeployments["dummy"] = i
 			if rn.GetNamespace() != "" {
 				namespace = rn.GetNamespace()
 			}
@@ -500,19 +500,24 @@ func (r *reconciler) injectNFResources(ctx context.Context, namespacedName types
 	}
 	r.l.Info("upfDeployment", "upfDeployment", upfDeployment)
 
+	r.l.Info("existingUPFDeployments", "existingUPFDeployments", existingUPFDeployments)
 	conditionType := fmt.Sprintf("%s.%s.%s.Injected", upfConditionType, GetNfName(*clusterContext.Spec.SiteCode), namespace)
-	if i, ok := existingUPFDeployments[GetNfName(*clusterContext.Spec.SiteCode)]; ok {
+	if i, ok := existingUPFDeployments["dummy"]; ok {
 		r.l.Info("replacing existing UPFDeployment", "upfDeploymentName", GetNfName(*clusterContext.Spec.SiteCode), "upfDeployment", upfDeployment)
 
-		n := pkgBuf.Nodes[i]
-		// set the spec on the one in the package to match our spec
-		field := upfDeployment.Field("spec")
-		if err := n.SetMapField(field.Value, "spec"); err != nil {
-			r.l.Error(err, "could not set UPFDeployment.Spec")
-			meta.SetStatusCondition(prConditions, metav1.Condition{Type: conditionType, Status: metav1.ConditionFalse,
-				Reason: "ResourceSpecErr", Message: err.Error()})
-			return prResources, pkgBuf, err
-		}
+		pkgBuf.Nodes[i] = upfDeployment
+		// TBD with John why we dont do this
+		/*
+			n := pkgBuf.Nodes[i]
+			// set the spec on the one in the package to match our spec
+			field := upfDeployment.Field("spec")
+			if err := n.SetMapField(field.Value, "spec"); err != nil {
+				r.l.Error(err, "could not set UPFDeployment.Spec")
+				meta.SetStatusCondition(prConditions, metav1.Condition{Type: conditionType, Status: metav1.ConditionFalse,
+					Reason: "ResourceSpecErr", Message: err.Error()})
+				return prResources, pkgBuf, err
+			}
+		*/
 
 		r.l.Info("setting condition", "conditionType", conditionType)
 		meta.SetStatusCondition(prConditions, metav1.Condition{Type: conditionType, Status: metav1.ConditionTrue,
