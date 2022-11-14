@@ -405,10 +405,14 @@ func (r *reconciler) injectNFResources(ctx context.Context, namespacedName types
 			pkgBuf.Nodes = append(pkgBuf.Nodes, ipAlloc)
 		}
 
-		conditionType := fmt.Sprintf("%s.%s.%s.Injected", ipamConditionType, GetNfEndpointName(*clusterContext.Spec.SiteCode, epName), namespace)
-		r.l.Info("setting condition", "conditionType", conditionType)
-		meta.SetStatusCondition(prConditions, metav1.Condition{Type: conditionType, Status: metav1.ConditionFalse,
-			Reason: "PendingInjection", Message: "Awaiting IP allocation and injection"})
+		// only update the condition when the condition type does not exist or when the status is false
+		if !isConditionSatisfied(pr.Status.Conditions, fmt.Sprintf("%s.%s.%s.Injected", ipamConditionType, GetNfEndpointName(*clusterContext.Spec.SiteCode, epName), namespace)) {
+			conditionType := fmt.Sprintf("%s.%s.%s.Injected", ipamConditionType, GetNfEndpointName(*clusterContext.Spec.SiteCode, epName), namespace)
+			r.l.Info("setting condition", "conditionType", conditionType)
+			meta.SetStatusCondition(prConditions, metav1.Condition{Type: conditionType, Status: metav1.ConditionFalse,
+				Reason: "PendingInjection", Message: "Awaiting IP allocation and injection"})
+		}
+
 	}
 
 	for _, n6Endpoint := range upfSpec.N6 {
@@ -447,46 +451,14 @@ func (r *reconciler) injectNFResources(ctx context.Context, namespacedName types
 			pkgBuf.Nodes = append(pkgBuf.Nodes, ipAlloc)
 		}
 
-		conditionType := fmt.Sprintf("%s.%s.%s.Injected", ipamConditionType, GetNfEndpointName(*clusterContext.Spec.SiteCode, n6Endpoint.DNN), namespace)
-		r.l.Info("setting condition", "conditionType", conditionType)
-		meta.SetStatusCondition(prConditions, metav1.Condition{Type: conditionType, Status: metav1.ConditionFalse,
-			Reason: "PendingInjection", Message: "Awaiting IP allocation and injection"})
+		// only update the condition when the condition type does not exist or when the status is false
+		if !isConditionSatisfied(pr.Status.Conditions, fmt.Sprintf("%s.%s.%s.Injected", ipamConditionType, GetNfEndpointName(*clusterContext.Spec.SiteCode, n6Endpoint.DNN), namespace)) {
+			conditionType := fmt.Sprintf("%s.%s.%s.Injected", ipamConditionType, GetNfEndpointName(*clusterContext.Spec.SiteCode, n6Endpoint.DNN), namespace)
+			r.l.Info("setting condition", "conditionType", conditionType)
+			meta.SetStatusCondition(prConditions, metav1.Condition{Type: conditionType, Status: metav1.ConditionFalse,
+				Reason: "PendingInjection", Message: "Awaiting IP allocation and injection"})
+		}
 	}
-	/*
-		ps, err := strconv.Atoi(*n6pool.PrefixSize)
-		if err != nil {
-			return prResources, pkgBuf, err
-		}
-		//ipPoolAllocName := strings.Join([]string{"upf", *clusterContext.Spec.SiteCode}, "-")
-		ipAlloc, err := ipam.BuildIPAMAllocation(
-			//ipPoolAllocName,
-			GetNfName(*clusterContext.Spec.SiteCode),
-			types.NamespacedName{
-				Name:      "n6pool",
-				Namespace: namespace,
-			},
-			ipamv1alpha1.IPAllocationSpec{
-				PrefixKind:   string(ipamv1alpha1.PrefixKindPool),
-				PrefixLength: uint8(ps),
-				Selector: &metav1.LabelSelector{
-					MatchLabels: map[string]string{
-						ipamv1alpha1.NephioNetworkInstanceKey: *n6pool.NetworkInstance,
-						ipamv1alpha1.NephioNetworkNameKey:     *n6pool.NetworkName,
-					},
-				},
-			})
-		if err != nil {
-			return prResources, pkgBuf, errors.Wrap(err, "cannot get ipalloc rnode")
-		}
-
-		if i, ok := existingIPAllocations[strings.Join([]string{ipPoolAllocName, "n6pool"}, "-")]; ok {
-			r.l.Info("replacing existing IPAllocation", "ipamResourceName", "n6pool", "ipAlloc", ipAlloc)
-			pkgBuf.Nodes[i] = ipAlloc
-		} else {
-			r.l.Info("adding new IPAllocation", "ipamResourceName", "n6pool", "ipAlloc", ipAlloc)
-			pkgBuf.Nodes = append(pkgBuf.Nodes, ipAlloc)
-		}
-	*/
 
 	upfDeployment, err := upf.BuildUPFDeployment(
 		types.NamespacedName{
@@ -503,32 +475,36 @@ func (r *reconciler) injectNFResources(ctx context.Context, namespacedName types
 	r.l.Info("existingUPFDeployments", "existingUPFDeployments", existingUPFDeployments)
 	conditionType := fmt.Sprintf("%s.%s.%s.Injected", upfConditionType, GetNfName(*clusterContext.Spec.SiteCode), namespace)
 	if i, ok := existingUPFDeployments["dummy"]; ok {
+		// TODO we always come here, needs a better startegy
 		r.l.Info("replacing existing UPFDeployment", "upfDeploymentName", GetNfName(*clusterContext.Spec.SiteCode), "upfDeployment", upfDeployment)
 
-		pkgBuf.Nodes[i] = upfDeployment
+		//pkgBuf.Nodes[i] = upfDeployment
 		// TBD with John why we dont do this
-		/*
-			n := pkgBuf.Nodes[i]
-			// set the spec on the one in the package to match our spec
-			field := upfDeployment.Field("spec")
-			if err := n.SetMapField(field.Value, "spec"); err != nil {
-				r.l.Error(err, "could not set UPFDeployment.Spec")
-				meta.SetStatusCondition(prConditions, metav1.Condition{Type: conditionType, Status: metav1.ConditionFalse,
-					Reason: "ResourceSpecErr", Message: err.Error()})
-				return prResources, pkgBuf, err
-			}
-		*/
 
-		r.l.Info("setting condition", "conditionType", conditionType)
+		n := pkgBuf.Nodes[i]
+		// set the spec on the one in the package to match our spec
+		field := upfDeployment.Field("spec")
+		if err := n.SetMapField(field.Value, "spec"); err != nil {
+			r.l.Error(err, "could not set UPFDeployment.Spec")
+			meta.SetStatusCondition(prConditions, metav1.Condition{Type: conditionType, Status: metav1.ConditionFalse,
+				Reason: "ResourceSpecErr", Message: err.Error()})
+			return prResources, pkgBuf, err
+		}
+
+		if !isConditionSatisfied(pr.Status.Conditions, conditionType) {
+			r.l.Info("setting condition", "conditionType", conditionType)
+			meta.SetStatusCondition(prConditions, metav1.Condition{Type: conditionType, Status: metav1.ConditionTrue,
+				Reason: "ResourceInjected", Message: fmt.Sprintf("injected from FiveGCoreTopology %q UPF name %q",
+					fiveGCore.Name, clusterSetName)})
+		}
+
+	}
+	/*
+		r.l.Info("setting upfdeployment condition", "conditionType", conditionType)
 		meta.SetStatusCondition(prConditions, metav1.Condition{Type: conditionType, Status: metav1.ConditionTrue,
 			Reason: "ResourceInjected", Message: fmt.Sprintf("injected from FiveGCoreTopology %q UPF name %q",
 				fiveGCore.Name, clusterSetName)})
-
-	}
-	r.l.Info("setting upfdeployment condition", "conditionType", conditionType)
-	meta.SetStatusCondition(prConditions, metav1.Condition{Type: conditionType, Status: metav1.ConditionTrue,
-		Reason: "ResourceInjected", Message: fmt.Sprintf("injected from FiveGCoreTopology %q UPF name %q",
-			fiveGCore.Name, clusterSetName)})
+	*/
 
 	return prResources, pkgBuf, nil
 }
@@ -573,6 +549,15 @@ func unconvertConditions(conditions *[]metav1.Condition) []porchv1alpha1.Conditi
 	}
 
 	return prConditions
+}
+
+func isConditionSatisfied(conditions []porchv1alpha1.Condition, ct string) bool {
+	for _, c := range conditions {
+		if c.Type == ct {
+			return c.Status == porchv1alpha1.ConditionTrue
+		}
+	}
+	return false
 }
 
 func fillClusterContext(rn *kyaml.RNode, cc *infrav1alpha1.ClusterContext) {
