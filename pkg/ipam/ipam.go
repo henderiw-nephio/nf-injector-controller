@@ -25,7 +25,7 @@ func getIPAllocation(nfName string, epName types.NamespacedName, spec ipamv1alph
 			Name:      strings.Join([]string{nfName, epName.Name}, "-"),
 			Namespace: epName.Namespace,
 			Annotations: map[string]string{
-				"config.kubernetes.io/local-config": "True",
+				"config.kubernetes.io/local-config": "true",
 			},
 			Labels: map[string]string{
 				ipamv1alpha1.NephioInterfaceKey: epName.Name,
