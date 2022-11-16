@@ -338,6 +338,7 @@ func (r *reconciler) injectNFResources(ctx context.Context, namespacedName types
 	upfDeploymentName := "" // will fill in from package, only one allowed now
 	var clusterContext *infrav1alpha1.ClusterContext
 	for i, rn := range pkgBuf.Nodes {
+		r.l.Info("kind", "kind", namespace)
 		if rn.GetKind() == "Namespace" {
 			namespace = rn.GetName()
 			r.l.Info("namespace kind found", "namespace", namespace)
