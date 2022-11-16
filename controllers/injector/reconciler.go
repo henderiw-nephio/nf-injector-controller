@@ -340,6 +340,7 @@ func (r *reconciler) injectNFResources(ctx context.Context, namespacedName types
 	for i, rn := range pkgBuf.Nodes {
 		if rn.GetKind() == "Namespace" {
 			namespace = rn.GetName()
+			r.l.Info("namespace kind found", "namespace", namespace)
 		}
 		if rn.GetApiVersion() == "ipam.nephio.org/v1alpha1" && rn.GetKind() == "IPAllocation" {
 			existingIPAllocations[rn.GetName()] = i
@@ -353,7 +354,7 @@ func (r *reconciler) injectNFResources(ctx context.Context, namespacedName types
 			fillClusterContext(rn, clusterContext)
 		}
 	}
-	r.l.Info("namespace", "namespace", namespace)
+	r.l.Info("namespace kind namespace name", "namespace", namespace)
 
 	if clusterContext == nil {
 		return prResources, pkgBuf, fmt.Errorf("ClusterContext is required")
