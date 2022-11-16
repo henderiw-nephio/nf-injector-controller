@@ -338,15 +338,17 @@ func (r *reconciler) injectNFResources(ctx context.Context, namespacedName types
 	upfDeploymentName := "" // will fill in from package, only one allowed now
 	var clusterContext *infrav1alpha1.ClusterContext
 	for i, rn := range pkgBuf.Nodes {
+		if rn.GetApiVersion() == "v1" && rn.GetKind() == "Namespace" {
+			if rn.GetNamespace() != "" {
+				namespace = rn.GetNamespace()
+			}
+		}
 		if rn.GetApiVersion() == "ipam.nephio.org/v1alpha1" && rn.GetKind() == "IPAllocation" {
 			existingIPAllocations[rn.GetName()] = i
 		}
 		if rn.GetApiVersion() == "nf.nephio.org/v1alpha1" && rn.GetKind() == "UPFDeployment" {
 			upfDeploymentName = rn.GetName()
 			existingUPFDeployments[rn.GetName()] = i
-			if rn.GetNamespace() != "" {
-				namespace = rn.GetNamespace()
-			}
 		}
 		if rn.GetApiVersion() == "infra.nephio.org/v1alpha1" && rn.GetKind() == "ClusterContext" {
 			clusterContext = &infrav1alpha1.ClusterContext{}
