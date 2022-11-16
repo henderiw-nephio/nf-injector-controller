@@ -339,9 +339,7 @@ func (r *reconciler) injectNFResources(ctx context.Context, namespacedName types
 	var clusterContext *infrav1alpha1.ClusterContext
 	for i, rn := range pkgBuf.Nodes {
 		if rn.GetKind() == "Namespace" {
-			if rn.GetNamespace() != "" {
-				namespace = rn.GetNamespace()
-			}
+			namespace = rn.GetName()
 		}
 		if rn.GetApiVersion() == "ipam.nephio.org/v1alpha1" && rn.GetKind() == "IPAllocation" {
 			existingIPAllocations[rn.GetName()] = i
