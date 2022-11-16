@@ -338,7 +338,7 @@ func (r *reconciler) injectNFResources(ctx context.Context, namespacedName types
 	upfDeploymentName := "" // will fill in from package, only one allowed now
 	var clusterContext *infrav1alpha1.ClusterContext
 	for i, rn := range pkgBuf.Nodes {
-		if rn.GetApiVersion() == "v1" && rn.GetKind() == "Namespace" {
+		if rn.GetKind() == "Namespace" {
 			if rn.GetNamespace() != "" {
 				namespace = rn.GetNamespace()
 			}
@@ -355,6 +355,7 @@ func (r *reconciler) injectNFResources(ctx context.Context, namespacedName types
 			fillClusterContext(rn, clusterContext)
 		}
 	}
+	r.l.Info("namespace", "namespace", namespace)
 
 	if clusterContext == nil {
 		return prResources, pkgBuf, fmt.Errorf("ClusterContext is required")
@@ -488,6 +489,7 @@ func (r *reconciler) injectNFResources(ctx context.Context, namespacedName types
 
 		n := pkgBuf.Nodes[i]
 		// set the spec on the one in the package to match our spec
+		n.SetNamespace(namespace)
 		field := upfDeployment.Field("spec")
 		if err := n.SetMapField(field.Value, "spec"); err != nil {
 			r.l.Error(err, "could not set UPFDeployment.Spec")
