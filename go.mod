@@ -7,6 +7,7 @@ require (
 	github.com/GoogleContainerTools/kpt-functions-sdk/go/fn v0.0.0-20221109010843-1f7d0c07a381
 	github.com/GoogleContainerTools/kpt/porch/api v0.0.0-20221109171719-946fa8175c0c
 	github.com/go-logr/logr v1.2.3
+	github.com/nephio-project/nephio-controller-poc v0.0.2
 	github.com/nephio-project/nephio-pocs/nephio-5gc-controller v0.0.0-20221111032037-69321960e5db
 	github.com/nokia/k8s-ipam v0.0.0-20221107150451-abc811dc482b
 	github.com/pkg/errors v0.9.1
@@ -16,8 +17,6 @@ require (
 	sigs.k8s.io/controller-runtime v0.13.0
 	sigs.k8s.io/kustomize/kyaml v0.13.9
 )
-
-require github.com/nephio-project/nephio-controller-poc v0.0.0-20221111013453-5a31b4722094
 
 require (
 	cloud.google.com/go v0.99.0 // indirect

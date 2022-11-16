@@ -295,8 +295,8 @@ github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 h1:C3w9PqII01/Oq
 github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822/go.mod h1:+n7T8mK8HuQTcFwEeznm/DIxMOiR9yIdICNftLE1DvQ=
 github.com/mwitkow/go-conntrack v0.0.0-20161129095857-cc309e4a2223/go.mod h1:qRWi+5nqEBWmkhHvq77mSJWrCKwh8bxhgT7d/eI7P4U=
 github.com/mwitkow/go-conntrack v0.0.0-20190716064945-2f068394615f/go.mod h1:qRWi+5nqEBWmkhHvq77mSJWrCKwh8bxhgT7d/eI7P4U=
-github.com/nephio-project/nephio-controller-poc v0.0.0-20221111013453-5a31b4722094 h1:oHjcKSeHB2s/ahYNvqFPZbekUBCrA1rMO7wmaw+O6Y0=
-github.com/nephio-project/nephio-controller-poc v0.0.0-20221111013453-5a31b4722094/go.mod h1:oE13Jb5gopskPCv0YERhXwqxWIbp6uVsma/uxuP/jKc=
+github.com/nephio-project/nephio-controller-poc v0.0.2 h1:0iSooKeWzqmcTiLLfAzA4oWTWNzvOc7qcfVN+ctYexI=
+github.com/nephio-project/nephio-controller-poc v0.0.2/go.mod h1:oE13Jb5gopskPCv0YERhXwqxWIbp6uVsma/uxuP/jKc=
 github.com/nephio-project/nephio-pocs/nephio-5gc-controller v0.0.0-20221111032037-69321960e5db h1:pUTpha+xs03Ds+oqjjd4IZt5hbcTV0aE0FrxeW5dNqo=
 github.com/nephio-project/nephio-pocs/nephio-5gc-controller v0.0.0-20221111032037-69321960e5db/go.mod h1:IiZl/gU3Fc4qr6C13fe+n7xiKlQCVCPf5Y+alNylYyQ=
 github.com/niemeyer/pretty v0.0.0-20200227124842-a10e7caefd8e/go.mod h1:zD1mROLANZcx1PVRCS0qkT7pwLkGfwJo4zjcN/Tysno=
