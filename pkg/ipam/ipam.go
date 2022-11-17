@@ -23,7 +23,7 @@ func getIPAllocation(nfName string, epName types.NamespacedName, spec ipamv1alph
 		},
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      strings.Join([]string{nfName, epName.Name}, "-"),
-			Namespace: epName.Namespace,
+			//Namespace: epName.Namespace,
 			Annotations: map[string]string{
 				"config.kubernetes.io/local-config": "true",
 			},
