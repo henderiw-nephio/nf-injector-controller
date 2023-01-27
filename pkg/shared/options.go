@@ -19,15 +19,14 @@ package shared
 import (
 	"time"
 
-	"github.com/nokia/k8s-ipam/pkg/alloc/allocpb"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 )
 
 type Options struct {
 	PorchClient client.Client
-	AllocClient allocpb.AllocationClient
-	Poll        time.Duration
-	Copts       controller.Options
+	//AllocClient allocpb.AllocationClient
+	Poll  time.Duration
+	Copts controller.Options
 	//Injectors   injectors.Injectors
 }

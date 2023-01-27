@@ -1,6 +1,6 @@
 VERSION ?= latest
-REGISTRY ?= yndd
-#REGISTRY ?= gcr.io/jbelamaric-public
+#REGISTRY ?= yndd
+REGISTRY ?= europe-docker.pkg.dev/srlinux/eu.gcr.io
 PROJECT ?= nf-injector
 
 KPT_BLUEPRINT_CFG_DIR ?= blueprint/fn-config

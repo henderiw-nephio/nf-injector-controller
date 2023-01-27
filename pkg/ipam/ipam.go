@@ -97,10 +97,9 @@ func (r *IpamAllocation) GetSpec() (*ipamv1alpha1.IPAllocationSpec, error) {
 	}
 
 	ipAllocSpec := &ipamv1alpha1.IPAllocationSpec{
-		PrefixKind:    spec.GetString("kind"),
-		AddressFamily: spec.GetString("addressFamily"),
-		Prefix:        spec.GetString("prefix"),
-		PrefixLength:  uint8(spec.GetInt("prefixLength")),
+		PrefixKind:   ipamv1alpha1.PrefixKind(spec.GetString("kind")),
+		Prefix:       spec.GetString("prefix"),
+		PrefixLength: uint8(spec.GetInt("prefixLength")),
 		Selector: &metav1.LabelSelector{
 			MatchLabels: selectorLabels,
 		},

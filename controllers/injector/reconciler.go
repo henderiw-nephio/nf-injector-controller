@@ -52,16 +52,6 @@ const (
 	finalizer         = "injector.nephio.org/finalizer"
 	upfConditionType  = "nf.nephio.org.UPFDeployment"
 	ipamConditionType = "ipam.nephio.org.IPAMAllocation"
-	//readinessGateKind = "nf"
-
-	//defaultNetworkInstance = "vpc-1"
-	//defaultKind            = "nad"
-	//defaultCniVersion      = "0.3.1"
-	// errors
-	//errGetCr        = "cannot get resource"
-	//errUpdateStatus = "cannot update status"
-
-	//reconcileFailed = "reconcile failed"
 )
 
 //+kubebuilder:rbac:groups=porch.kpt.dev,resources=packagerevisions,verbs=get;list;watch;create;update;patch;delete
@@ -133,18 +123,6 @@ func (r *reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	return ctrl.Result{}, nil
 }
 
-/*
-func hasReadinessGate(gates []porchv1alpha1.ReadinessGate, gate string) bool {
-	for i := range gates {
-		g := gates[i]
-		if g.ConditionType == gate {
-			return true
-		}
-	}
-	return false
-}
-*/
-
 func unsatisfiedConditions(conditions []porchv1alpha1.Condition, conditionType string) []porchv1alpha1.Condition {
 	var uc []porchv1alpha1.Condition
 	for _, c := range conditions {
@@ -155,21 +133,8 @@ func unsatisfiedConditions(conditions []porchv1alpha1.Condition, conditionType s
 			uc = append(uc, c)
 		}
 	}
-
 	return uc
 }
-
-/*
-func hasCondition(conditions []porchv1alpha1.Condition, conditionType string) (*porchv1alpha1.Condition, bool) {
-	for i := range conditions {
-		c := conditions[i]
-		if c.Type == conditionType {
-			return &c, true
-		}
-	}
-	return nil, false
-}
-*/
 
 func (r *reconciler) injectNFInfo(ctx context.Context, namespacedName types.NamespacedName) error {
 	r.l = log.FromContext(ctx)
@@ -320,10 +285,6 @@ func (r *reconciler) injectNFResources(ctx context.Context, namespacedName types
 		return prResources, pkgBuf, fmt.Errorf("N6.NetworkInstance is required")
 	}
 
-	if n6pool.NetworkName == nil || *n6pool.NetworkName == "" {
-		return prResources, pkgBuf, fmt.Errorf("N6.NetworkName is required")
-	}
-
 	endpoints := map[string]*nfv1alpha1.Endpoint{
 		"n3": &upfSpec.N3[0],
 		"n4": &upfSpec.N4[0],
@@ -375,26 +336,29 @@ func (r *reconciler) injectNFResources(ctx context.Context, namespacedName types
 
 	// create an IP Allocation per endpoint and per pool
 	for epName, ep := range endpoints {
-		if ep == nil || ep.NetworkInstance == nil || ep.NetworkName == nil || *ep.NetworkInstance == "" || *ep.NetworkName == "" {
+		if ep == nil || ep.NetworkInstance == nil || *ep.NetworkInstance == "" {
 			r.l.Info("skipping", "epName", epName, "ep", ep)
 			continue
 		}
-		r.l.Info("injecting IPAllocation for endpoint", "epName", epName, "ep", ep)
-		//ipAllocName := strings.Join([]string{"upf", *clusterContext.Spec.SiteCode}, "-") // TODO need more discussion
-		//ipamResourceName := strings.Join([]string{ipAllocName, epName}, "-")
+		r.l.Info("injecting IPAllocation for endpoint", "epName", epName, "ep", ep, "siteCode", *clusterContext.Spec.SiteCode)
 		ipAlloc, err := ipam.BuildIPAMAllocation(
 			GetNfName(*clusterContext.Spec.SiteCode),
-			//ipAllocName,
 			types.NamespacedName{
 				Name:      epName,
 				Namespace: namespace,
 			},
 			ipamv1alpha1.IPAllocationSpec{
-				PrefixKind: string(ipamv1alpha1.PrefixKindNetwork),
+				PrefixKind: ipamv1alpha1.PrefixKindNetwork,
+				NetworkInstanceRef: &ipamv1alpha1.NetworkInstanceReference{
+					Name:      *ep.NetworkInstance,
+					Namespace: "default",
+				},
 				Selector: &metav1.LabelSelector{
 					MatchLabels: map[string]string{
-						ipamv1alpha1.NephioNetworkInstanceKey: *ep.NetworkInstance,
-						ipamv1alpha1.NephioNetworkNameKey:     *ep.NetworkName,
+						ipamv1alpha1.NephioSiteKey: *clusterContext.Spec.SiteCode,
+						//ipamv1alpha1.NephioNetworkInstanceKey: *ep.NetworkInstance,
+						//ipamv1alpha1.NephioNetworkNameKey:     *ep.NetworkName,
+
 					},
 				},
 			})
@@ -438,11 +402,15 @@ func (r *reconciler) injectNFResources(ctx context.Context, namespacedName types
 				Namespace: namespace,
 			},
 			ipamv1alpha1.IPAllocationSpec{
-				PrefixKind:   string(ipamv1alpha1.PrefixKindPool),
+				PrefixKind: ipamv1alpha1.PrefixKindPool,
+				NetworkInstanceRef: &ipamv1alpha1.NetworkInstanceReference{
+					Name:      *n6Endpoint.UEPool.NetworkInstance,
+					Namespace: "default",
+				},
 				PrefixLength: uint8(ps),
 				Selector: &metav1.LabelSelector{
 					MatchLabels: map[string]string{
-						ipamv1alpha1.NephioNetworkInstanceKey: *n6Endpoint.UEPool.NetworkInstance,
+						ipamv1alpha1.NephioPurposeKey: "pool",
 					},
 				},
 			})

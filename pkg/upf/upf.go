@@ -53,14 +53,16 @@ func GetEndpoint(epName string, source *kyaml.RNode) (*nfv1alpha1.Endpoint, erro
 	if err != nil {
 		return nil, err
 	}
-	networkName, err := GetValue(source, fmt.Sprintf("spec.upfs.0.upf..%s.0.networkName", epName))
-	if err != nil {
-		return nil, err
-	}
+	/*
+		networkName, err := GetValue(source, fmt.Sprintf("spec.upfs.0.upf..%s.0.networkName", epName))
+		if err != nil {
+			return nil, err
+		}
+	*/
 
 	return &nfv1alpha1.Endpoint{
 		NetworkInstance: &networkInstance,
-		NetworkName:     &networkName,
+		//NetworkName:     &networkName,
 	}, nil
 }
 
@@ -69,20 +71,24 @@ func GetN6Endpoint(epName string, source *kyaml.RNode) (*nfv1alpha1.N6Endpoint, 
 	if err != nil {
 		return nil, err
 	}
-	networkName, err := GetValue(source, fmt.Sprintf("spec.upfs.0.upf.%s.0.endpoint.networkName", epName))
-	if err != nil {
-		return nil, err
-	}
+	/*
+		networkName, err := GetValue(source, fmt.Sprintf("spec.upfs.0.upf.%s.0.endpoint.networkName", epName))
+		if err != nil {
+			return nil, err
+		}
+	*/
 
 	poolNetworkInstance, err := GetValue(source, fmt.Sprintf("spec.upfs.0.upf.%s.0.uePool.networkInstance", epName))
 	if err != nil {
 		return nil, err
 	}
 
-	poolNetworkName, err := GetValue(source, fmt.Sprintf("spec.upfs.0.upf.%s.0.uePool.networkName", epName))
-	if err != nil {
-		return nil, err
-	}
+	/*
+		poolNetworkName, err := GetValue(source, fmt.Sprintf("spec.upfs.0.upf.%s.0.uePool.networkName", epName))
+		if err != nil {
+			return nil, err
+		}
+	*/
 	poolPrefixSize, err := GetValue(source, fmt.Sprintf("spec.upfs.0.upf.%s.0.uePool.prefixSize", epName))
 	if err != nil {
 		return nil, err
@@ -92,12 +98,12 @@ func GetN6Endpoint(epName string, source *kyaml.RNode) (*nfv1alpha1.N6Endpoint, 
 	return &nfv1alpha1.N6Endpoint{
 		Endpoint: nfv1alpha1.Endpoint{
 			NetworkInstance: &networkInstance,
-			NetworkName:     &networkName,
+			//NetworkName:     &networkName,
 		},
 		UEPool: nfv1alpha1.Pool{
 			NetworkInstance: &poolNetworkInstance,
-			NetworkName:     &poolNetworkName,
-			PrefixSize:      &poolPrefixSize,
+			//NetworkName:     &poolNetworkName,
+			PrefixSize: &poolPrefixSize,
 		},
 	}, nil
 }
@@ -155,7 +161,7 @@ func BuildUPFDeploymentSpec(endponts map[string]*nfv1alpha1.Endpoint, dnn string
 		Capacity: capacity,
 	}
 	for epName, ep := range endponts {
-		if ep != nil && *ep.NetworkInstance != "" && *ep.NetworkName != "" {
+		if ep != nil && *ep.NetworkInstance != "" {
 			switch epName {
 			case "n3":
 				spec.N3Interfaces = GetDummyInterfaces(epName)

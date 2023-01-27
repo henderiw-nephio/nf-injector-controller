@@ -32,7 +32,6 @@ import (
 	"github.com/nephio-project/nephio-controller-poc/pkg/porch"
 	nfv1alpha1 "github.com/nephio-project/nephio-pocs/nephio-5gc-controller/apis/nf/v1alpha1"
 	ipamv1alpha1 "github.com/nokia/k8s-ipam/apis/ipam/v1alpha1"
-	"github.com/nokia/k8s-ipam/pkg/alloc/alloc"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -99,14 +98,16 @@ func main() {
 		os.Exit(1)
 	}
 
-	allocClient, err := alloc.CreateClient(&alloc.Config{
-		Address:  "127.0.0.1:9999",
-		Insecure: true,
-	})
-	if err != nil {
-		setupLog.Error(err, "unable to create grpc ipam client")
-		os.Exit(1)
-	}
+	/*
+		allocClient, err := alloc.CreateClient(&alloc.Config{
+			Address:  "127.0.0.1:9999",
+			Insecure: true,
+		})
+		if err != nil {
+			setupLog.Error(err, "unable to create grpc ipam client")
+			os.Exit(1)
+		}
+	*/
 
 	porchClient, err := porch.CreateClient()
 	if err != nil {
@@ -116,8 +117,8 @@ func main() {
 
 	if err := controllers.Setup(mgr, &shared.Options{
 		PorchClient: porchClient,
-		AllocClient: allocClient,
-		Poll:        5 * time.Second,
+		//AllocClient: allocClient,
+		Poll: 5 * time.Second,
 		Copts: controller.Options{
 			MaxConcurrentReconciles: 1,
 		},
