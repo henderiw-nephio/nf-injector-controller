@@ -18,8 +18,8 @@ import (
 func getIPAllocation(nfName string, epName types.NamespacedName, spec ipamv1alpha1.IPAllocationSpec) string {
 	x := &ipamv1alpha1.IPAllocation{
 		TypeMeta: metav1.TypeMeta{
-			Kind:       "IPAllocation",
-			APIVersion: "ipam.nephio.org/v1alpha1",
+			APIVersion: ipamv1alpha1.GroupVersion.String(),
+			Kind:       ipamv1alpha1.IPAllocationKind,
 		},
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      strings.Join([]string{nfName, epName.Name}, "-"),
@@ -29,6 +29,7 @@ func getIPAllocation(nfName string, epName types.NamespacedName, spec ipamv1alph
 			},
 			Labels: map[string]string{
 				ipamv1alpha1.NephioInterfaceKey: epName.Name,
+				ipamv1alpha1.NephioOwnerGvkKey:  "FiveGCoreTopology.v1alpha1.nf.nephio.org",
 			},
 		},
 		Spec: spec,

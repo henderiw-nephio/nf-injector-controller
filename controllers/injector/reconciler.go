@@ -356,9 +356,6 @@ func (r *reconciler) injectNFResources(ctx context.Context, namespacedName types
 				Selector: &metav1.LabelSelector{
 					MatchLabels: map[string]string{
 						ipamv1alpha1.NephioSiteKey: *clusterContext.Spec.SiteCode,
-						//ipamv1alpha1.NephioNetworkInstanceKey: *ep.NetworkInstance,
-						//ipamv1alpha1.NephioNetworkNameKey:     *ep.NetworkName,
-
 					},
 				},
 			})
